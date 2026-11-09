@@ -65,3 +65,4 @@ Dans Ocean, indique l’URL HTTPS affichée par Serve, suivie de `/v1`. L’adre
 Par message, tu peux joindre jusqu’à 4 documents de 12 Mo chacun, avec 45 000 caractères extraits au total. Les PDF sont limités à 100 pages et les pages scannées comptent dans la limite de 4 images par message.
 
 `npm test` vérifie le protocole d’inférence avec un serveur simulé. `npm run build` compile la version de production.
+
