@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+  <defs>
+    <linearGradient id="star" x1="0" y1="1" x2="1" y2="0" gradientUnits="objectBoundingBox">
+      <stop stop-color="#3186ff"/>
+      <stop offset=".42" stop-color="#34a853"/>
+      <stop offset=".67" stop-color="#fbbc05"/>
+      <stop offset="1" stop-color="#ea4335"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#star)" d="M20 2c2.3 10.7 7.3 15.7 18 18-10.7 2.3-15.7 7.3-18 18C17.7 27.3 12.7 22.3 2 20 12.7 17.7 17.7 12.7 20 2Z"/>
+</svg>
