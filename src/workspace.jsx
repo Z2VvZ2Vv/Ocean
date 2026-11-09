@@ -1,11 +1,12 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Copy, Ellipsis, ExternalLink, LoaderCircle, Pencil, RotateCw, Trash2 } from 'lucide-react'
-import { Composer, IconButton, Modal, Setup, Sidebar } from './ui.jsx'
+import { Check, ChevronDown, Copy, EllipsisVertical, ExternalLink, LoaderCircle, Menu, Pencil, RotateCw, SquarePen, Trash2 } from 'lucide-react'
+import { Composer, FileChip, IconButton, Modal, ModelControl, Setup, Sidebar } from './ui.jsx'
 import { defaultSettings, runChat } from './inference.js'
 import { chatTools } from './tools.js'
 import { deleteChat, loadWorkspace, saveChat, saveSettings } from './storage.js'
 
 const Markdown = lazy(() => import('./markdown.jsx'))
+const emptyAttachments = { images: [], documents: [] }
 
 function Answer({ message, generating, progress }) {
   const [copied, setCopied] = useState(false)
@@ -47,11 +48,14 @@ function UserMessage({ message }) {
     {!!message.images?.length && <div className="user-images">
       {message.images.map(image => <img key={image.id} src={image.url} alt={image.name} />)}
     </div>}
+    {!!message.documents?.length && <div className="user-files">
+      {message.documents.map(file => <FileChip key={file.id} file={file} />)}
+    </div>}
     {message.text && <div className="user-bubble">{message.text}</div>}
   </article>
 }
 
-export function Workspace({ user, searchEnabled, onSignOut }) {
+export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange }) {
   const [settings, setSettings] = useState(defaultSettings)
   const [chats, setChats] = useState([])
   const [activeId, setActiveId] = useState('')
@@ -62,17 +66,20 @@ export function Workspace({ user, searchEnabled, onSignOut }) {
   const [dialog, setDialog] = useState('')
   const [titleDraft, setTitleDraft] = useState('')
   const [value, setValue] = useState('')
-  const [images, setImages] = useState([])
+  const [attachments, setAttachments] = useState(emptyAttachments)
+  const [reading, setReading] = useState(false)
   const [learning, setLearning] = useState(false)
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(null)
   const [live, setLive] = useState(null)
   const [progress, setProgress] = useState('')
   const request = useRef(null)
+  const attachmentRead = useRef(null)
   const transcript = useRef(null)
   const follow = useRef(true)
   const activeChat = chats.find(chat => chat.id === activeId)
   const busy = live !== null
+  const messages = live ? [...(activeChat?.messages || []), live] : activeChat?.messages
 
   useEffect(() => {
     let active = true
@@ -85,6 +92,8 @@ export function Workspace({ user, searchEnabled, onSignOut }) {
       .finally(() => { if (active) setReady(true) })
     return () => {
       active = false
+      attachmentRead.current?.abort()
+      attachmentRead.current = null
       request.current?.abort()
     }
   }, [user.id])
@@ -123,6 +132,34 @@ export function Workspace({ user, searchEnabled, onSignOut }) {
     if (activeChat) storeChat({ ...activeChat, learning: enabled })
   }
 
+  async function attach(read) {
+    if (request.current || attachmentRead.current) return false
+    const controller = new AbortController()
+    attachmentRead.current = controller
+    setReading(true)
+    setError('')
+    try {
+      const next = await read(attachments, controller.signal)
+      if (controller.signal.aborted) return false
+      setAttachments(next)
+      return true
+    } catch (problem) {
+      if (!controller.signal.aborted) setError(problem.message)
+      return false
+    } finally {
+      if (attachmentRead.current === controller) {
+        attachmentRead.current = null
+        setReading(false)
+      }
+    }
+  }
+
+  function openSettings() {
+    setMenu('')
+    setSetup('settings')
+    if (matchMedia('(max-width: 849px)').matches) setSideOpen(false)
+  }
+
   function openChat(id = '') {
     if (request.current || id && id === activeId) return
     const chat = chats.find(item => item.id === id)
@@ -130,7 +167,10 @@ export function Workspace({ user, searchEnabled, onSignOut }) {
     setActiveId(id)
     setLearning(Boolean(chat?.learning))
     setValue('')
-    setImages([])
+    attachmentRead.current?.abort()
+    attachmentRead.current = null
+    setReading(false)
+    setAttachments(emptyAttachments)
     setError('')
     setRetry(null)
     setMenu('')
@@ -171,20 +211,22 @@ export function Workspace({ user, searchEnabled, onSignOut }) {
 
   function submit() {
     const text = value.trim()
-    if (request.current || !ready || (!text && !images.length)) return
-    const title = text.replace(/\s+/g, ' ').slice(0, 54) || 'Capture d’écran'
+    const { images, documents } = attachments
+    if (request.current || attachmentRead.current || !ready || (!text && !images.length && !documents.length)) return
+    const title = (text || documents[0]?.name || 'Capture d’écran').replace(/\s+/g, ' ').slice(0, 54)
     const chat = activeChat || { id: crypto.randomUUID(), title, messages: [] }
-    const message = { id: crypto.randomUUID(), role: 'user', text, images }
+    const message = { id: crypto.randomUUID(), role: 'user', text, ...attachments }
     const next = { ...chat, learning, updatedAt: Date.now(), messages: [...chat.messages, message] }
     setActiveId(next.id)
     storeChat(next)
     setValue('')
-    setImages([])
+    setAttachments(emptyAttachments)
     setMenu('')
     void generate(next)
   }
 
   function retryResponse() {
+    if (attachmentRead.current) return
     const chat = { ...retry, learning }
     storeChat(chat)
     void generate(chat)
@@ -212,16 +254,20 @@ export function Workspace({ user, searchEnabled, onSignOut }) {
     }
   }
 
+  const modelProps = { settings, changeSettings, openSettings, busy: busy || !ready, menu, setMenu }
   return <div className={`workspace ${sideOpen ? 'nav-open' : ''}`}>
     <Sidebar user={user} open={sideOpen} toggle={() => setSideOpen(!sideOpen)}
-      chats={chats} activeId={activeId} onNew={() => openChat()} onOpen={openChat} onSettings={() => { setMenu(''); setSetup('settings') }}
+      chats={chats} activeId={activeId} onNew={() => openChat()} onOpen={openChat} onSettings={openSettings}
       onSignOut={signOut} busy={busy} menu={menu} setMenu={setMenu} />
     {sideOpen && <button className="mobile-overlay" type="button" aria-label="Réduire le menu" onClick={() => setSideOpen(false)} />}
     <main className={`stage ${activeChat ? 'conversation' : 'home'}`}>
       {!activeChat && <div className="halo" />}
       <header className="stage-header">
+        <IconButton label="Ouvrir le menu" className="mobile-header-control" onClick={() => setSideOpen(!sideOpen)} aria-expanded={sideOpen}><Menu size={23} /></IconButton>
+        <ModelControl {...modelProps} inHeader />
+        <IconButton label="Nouvelle discussion" className="mobile-header-control header-new-chat" onClick={() => openChat()} disabled={busy}><SquarePen size={21} /></IconButton>
         {activeChat && <div className="chat-menu-control" data-menu>
-          <IconButton label="Options de la discussion" onClick={() => setMenu(menu === 'chat' ? '' : 'chat')} aria-expanded={menu === 'chat'} disabled={busy}><Ellipsis size={22} /></IconButton>
+          <IconButton label="Options de la discussion" onClick={() => setMenu(menu === 'chat' ? '' : 'chat')} aria-expanded={menu === 'chat'} disabled={busy}><EllipsisVertical size={21} /></IconButton>
           {menu === 'chat' && <div className="popover chat-menu">
             <button type="button" className="menu-row" onClick={() => { setTitleDraft(activeChat.title); setDialog('rename'); setMenu('') }}><Pencil size={16} /> Renommer</button>
             <button type="button" className="menu-row danger-text" onClick={() => { setDialog('delete'); setMenu('') }}><Trash2 size={16} /> Supprimer</button>
@@ -233,24 +279,24 @@ export function Workspace({ user, searchEnabled, onSignOut }) {
         follow.current = scrollHeight - scrollTop - clientHeight < 90
       }}>
         <div className="messages">
-          {activeChat.messages.map(message => message.role === 'user'
+          {messages.map(message => message.role === 'user'
             ? <UserMessage key={message.id} message={message} />
-            : <Answer key={message.id} message={message} />)}
-          {live && <Answer message={live} generating progress={progress} />}
+            : <Answer key={message.id} message={message} generating={message.id === live?.id} progress={progress} />)}
+          {!busy && <p className="mobile-disclaimer">Ocean peut se tromper. Pense à vérifier ses réponses.</p>}
         </div>
       </div>}
       <div className="composer-dock">
         {!activeChat && <h1>{learning ? 'Qu’aimerais-tu apprendre ?' : 'Par quoi commencer ?'}</h1>}
         {error && <div className="chat-error" role="alert">{error}</div>}
-        {retry && !busy && <button type="button" className="retry-button" onClick={retryResponse}><RotateCw size={15} /> Réessayer</button>}
-        {ready ? <Composer value={value} setValue={setValue} images={images} setImages={setImages} learning={learning} setLearning={changeLearning}
-          settings={settings} changeSettings={changeSettings} openSettings={() => setSetup('settings')} onSubmit={submit}
-          onStop={() => request.current?.abort()} busy={busy} menu={menu} setMenu={setMenu} setError={setError} />
+        {retry && !busy && <button type="button" className="retry-button" onClick={retryResponse} disabled={reading}><RotateCw size={15} /> Réessayer</button>}
+        {ready ? <Composer value={value} setValue={setValue} attachments={attachments} setAttachments={setAttachments}
+          onAttach={attach} reading={reading} learning={learning} setLearning={changeLearning} onSubmit={submit}
+          onStop={() => request.current?.abort()} busy={busy} menu={menu} setMenu={setMenu} modelControl={<ModelControl {...modelProps} />} />
           : <LoaderCircle className="spinner" size={22} aria-label="Chargement" />}
       </div>
       {activeChat && <footer className="chat-footer">Ocean peut se tromper. Pense à vérifier ses réponses.</footer>}
     </main>
-    {setup && <Setup settings={settings} initial={setup === 'onboarding'} onSave={next => { changeSettings(next); setSetup('') }}
+    {setup && <Setup settings={settings} initial={setup === 'onboarding'} theme={theme} onThemeChange={onThemeChange} onSave={next => { changeSettings(next); setSetup('') }}
       onClose={() => { if (setup === 'onboarding') changeSettings(settings); setSetup('') }} />}
     {dialog && <Modal title={dialog === 'rename' ? 'Renommer la discussion' : 'Supprimer la discussion ?'} onClose={() => setDialog('')}>
       <form className="confirm-form" onSubmit={handleDialog}>

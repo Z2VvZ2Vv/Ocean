@@ -77,19 +77,49 @@ function SignIn({ session, onSignIn, onPreview, error }) {
   </div>
 }
 
+function savedTheme() {
+  try {
+    const value = localStorage.getItem('ocean-theme')
+    if (value === 'light' || value === 'dark') return value
+  } catch {}
+  return 'system'
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme
+  const dark = theme === 'dark' || theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches
+  document.querySelector('meta[name="theme-color"]').content = dark ? '#000000' : '#faf8f8'
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [error, setError] = useState('')
+  const [theme, setTheme] = useState(savedTheme)
   useEffect(() => { auth().then(setSession).catch(() => setError('Le service de connexion est inaccessible.')) }, [])
+  useEffect(() => {
+    const system = matchMedia('(prefers-color-scheme: dark)')
+    const update = () => applyTheme(theme)
+    update()
+    system.addEventListener('change', update)
+    return () => system.removeEventListener('change', update)
+  }, [theme])
+
+  function changeTheme(value) {
+    applyTheme(value)
+    setTheme(value)
+    try { localStorage.setItem('ocean-theme', value) } catch {}
+  }
 
   async function signOut() {
     if (!session.preview) await auth('logout')
     setSession(await auth())
   }
 
-  if (session?.user) return <Workspace key={session.user.id} user={session.user} searchEnabled={session.search} onSignOut={signOut} />
+  if (session?.user) return <Workspace key={session.user.id} user={session.user} searchEnabled={session.search} onSignOut={signOut}
+    theme={theme} onThemeChange={changeTheme} />
   return <SignIn session={session} error={error} onSignIn={setSession}
     onPreview={() => setSession({ preview: true, user: { id: 'ocean-local-preview', name: 'Geoff' } })} />
 }
 
+applyTheme(savedTheme())
 createRoot(document.getElementById('root')).render(<App />)

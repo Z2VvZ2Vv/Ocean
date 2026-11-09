@@ -64,3 +64,29 @@ test('une image seule et les résultats des outils repartent directement vers le
   assert.equal(answer.reasoning, 'Vérification')
   assert.equal(answer.text, 'Quel serait ton premier indice ?')
 })
+
+test('les documents restent disponibles au tour suivant et les scans gardent leur numéro de page', async ({ mock }) => {
+  const scan = 'data:image/jpeg;base64,c2Nhbg=='
+  const messages = [
+    { role: 'user', text: '', documents: [{ name: 'Cours.pdf', text: 'Page 1\nLa charge est quantifiée.' }] },
+    { role: 'assistant', text: 'Le cours parle de charge.' },
+    { role: 'user', text: 'Compare avec ce scan.', documents: [{ name: 'Exercice.pdf', text: '', pageImages: [{ number: 3, url: scan }] }] },
+  ]
+  let body
+  mock.method(globalThis, 'fetch', async (url, options) => {
+    body = JSON.parse(options.body)
+    return stream({ delta: { content: 'Comparaison' }, finish_reason: 'stop' })
+  })
+
+  await runChat({
+    config: defaultSettings, messages, tools: [], signal: new AbortController().signal,
+    onTool: () => {}, onUpdate: () => {},
+  })
+
+  assert.match(body.messages[1].content, /Pièce jointe "Cours.pdf"\nPage 1\nLa charge est quantifiée\./)
+  assert.deepEqual(body.messages.at(-1).content, [
+    { type: 'text', text: 'Compare avec ce scan.' },
+    { type: 'text', text: 'Pièce jointe "Exercice.pdf", page 3' },
+    { type: 'image_url', image_url: { url: scan } },
+  ])
+})

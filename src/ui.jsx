@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  ArrowUp, BookOpen, Check, ChevronDown, CircleHelp, ImagePlus, LoaderCircle,
-  LogOut, Network, PanelLeft, Plus, Search, Settings2, Square, SquarePen, X,
+  ArrowUp, BookOpen, Check, ChevronDown, CircleHelp, FileText, LoaderCircle,
+  LogOut, Monitor, Moon, Network, PanelLeft, Paperclip, Plus, Search, Settings2, Square, SquarePen, Sun, X,
 } from 'lucide-react'
-import { maxImages, pastedImages, readImages } from './clipboard.js'
+import { maxImages, pastedImages } from './clipboard.js'
+import { attachmentTypes, imageSlots, readAttachments } from './attachments.js'
 import { apiBase, effortLevels, listModels, modelName } from './inference.js'
 
 export function Brand() {
@@ -59,64 +60,88 @@ export function Sidebar({ user, open, toggle, chats, activeId, onNew, onOpen, on
   </aside>
 }
 
+export function FileChip({ file, onRemove }) {
+  const pages = file.pageCount === 1 ? ' · 1 page' : file.pageCount ? ` · ${file.pageCount} pages` : ''
+  return <div className="file-chip" title={file.name}>
+    <span className="file-symbol"><FileText size={19} /></span>
+    <span className="file-label">
+      <strong>{file.name}</strong>
+      <small>{file.format}{pages}{file.pageImages?.length ? ' · Vision' : ''}</small>
+    </span>
+    {onRemove && <IconButton label={`Retirer ${file.name}`} onClick={onRemove}><X size={15} /></IconButton>}
+  </div>
+}
+
 export function Composer({
-  value, setValue, images, setImages, learning, setLearning, settings, changeSettings,
-  openSettings, onSubmit, onStop, busy, menu, setMenu, setError,
+  value, setValue, attachments, setAttachments, onAttach, reading, learning, setLearning,
+  onSubmit, onStop, busy, menu, setMenu, modelControl,
 }) {
+  const { images, documents } = attachments
   const field = useRef(null)
   const fileInput = useRef(null)
-  const limits = useRef({ images, busy })
-  limits.current = { images, busy }
   useEffect(() => {
     const input = field.current
     input.style.height = '0'
     input.style.height = `${Math.min(input.scrollHeight, 168)}px`
-  }, [value, images.length])
+  }, [value, images.length, documents.length, learning, reading])
 
   function focus() { field.current?.focus() }
   function toggle(id) { setMenu(menu === id ? '' : id) }
-  async function attach(pending) {
-    try {
-      const added = await pending
-      if (limits.current.busy) return
-      setImages(current => [...current, ...added].slice(0, maxImages))
-      if (!added.length) setError(`Jusqu’à ${maxImages} images par message.`)
-      focus()
-    } catch (problem) {
-      setError(problem.message)
-    }
+  async function attach(read) {
+    if (await onAttach(read)) focus()
+  }
+
+  function attachFiles(files) {
+    if (files.length && !busy && !reading) void attach((current, signal) => readAttachments(files, current, signal))
   }
 
   function paste(event) {
-    const pending = pastedImages(event.clipboardData, Math.max(0, maxImages - images.length))
+    if (reading) { event.preventDefault(); return }
+    const pending = pastedImages(event.clipboardData, imageSlots(attachments))
     if (!pending) return
     event.preventDefault()
-    void attach(pending)
+    void attach(async current => {
+      const added = await pending
+      if (!added.length) throw new Error(`Jusqu’à ${maxImages} images ou pages scannées par message.`)
+      return { ...current, images: [...current.images, ...added] }
+    })
   }
 
-  const multiline = value.includes('\n') || value.length > 45 || images.length > 0 || learning
-  const availableModels = settings.models.length ? settings.models : [settings.model]
-  return <form className={`composer ${multiline ? 'multiline' : ''}`} onSubmit={event => { event.preventDefault(); onSubmit() }}>
-    <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden
+  function remove(type, id) {
+    setAttachments(current => ({ ...current, [type]: current[type].filter(item => item.id !== id) }))
+  }
+
+  const hasAttachments = images.length > 0 || documents.length > 0
+  const multiline = value.includes('\n') || value.length > 45 || hasAttachments || learning || reading
+  return <form className={`composer ${multiline ? 'multiline' : ''}`} onSubmit={event => { event.preventDefault(); onSubmit() }}
+    onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault() }}
+    onDrop={event => {
+      if (!event.dataTransfer.files.length) return
+      event.preventDefault()
+      attachFiles([...event.dataTransfer.files])
+    }}>
+    <input ref={fileInput} type="file" aria-label="Ajouter des fichiers" accept={attachmentTypes} multiple hidden
       onChange={event => {
         const files = [...event.target.files]
         event.target.value = ''
-        if (files.length) void attach(readImages(files.slice(0, Math.max(0, maxImages - images.length))))
+        attachFiles(files)
       }} />
-    {!!images.length && <div className="draft-images">
+    {(hasAttachments || reading) && <div className="draft-attachments">
       {images.map(image => <div className="draft-image" key={image.id}>
         <img src={image.url} alt={image.name} />
-        <IconButton label={`Retirer ${image.name}`} onClick={() => setImages(current => current.filter(item => item.id !== image.id))}><X size={14} /></IconButton>
+        <IconButton label={`Retirer ${image.name}`} disabled={reading} onClick={() => remove('images', image.id)}><X size={14} /></IconButton>
       </div>)}
+      {documents.map(file => <FileChip key={file.id} file={file} onRemove={reading ? undefined : () => remove('documents', file.id)} />)}
+      {reading && <span className="attachment-status" role="status"><LoaderCircle size={16} className="spinner" /> Lecture des fichiers…</span>}
     </div>}
     <div className="composer-tools" data-menu>
-      <IconButton label="Ajouter ou choisir un outil" aria-expanded={menu === 'tools'} onClick={() => toggle('tools')} disabled={busy}><Plus size={23} /></IconButton>
+      <IconButton label="Ajouter ou choisir un outil" aria-expanded={menu === 'tools'} onClick={() => toggle('tools')} disabled={busy || reading}><Plus size={23} /></IconButton>
       {learning && <button className="learning-chip" type="button" title="Désactiver l’apprentissage guidé" onClick={() => setLearning(false)} disabled={busy}>
         <BookOpen size={15} /> Apprentissage <X size={13} />
       </button>}
       {menu === 'tools' && <div className="popover tools-menu">
         <button type="button" className="menu-row" onClick={() => { setMenu(''); fileInput.current.click() }}>
-          <ImagePlus size={18} /> Ajouter des images
+          <Paperclip size={18} /> Ajouter des fichiers
         </button>
         <button type="button" className="menu-row" onClick={() => { setLearning(!learning); setMenu(''); focus() }}>
           <BookOpen size={18} /> Apprentissage guidé {learning && <Check className="menu-check" size={16} />}
@@ -133,30 +158,38 @@ export function Composer({
         }
       }} />
     <div className="composer-actions">
-      <div className="model-control" data-menu>
-        <button className="model-button" type="button" aria-label="Modèle et niveau de réflexion" aria-expanded={menu === 'model'}
-          onClick={() => toggle('model')} disabled={busy}>{modelName(settings.model)} <ChevronDown size={16} /></button>
-        {menu === 'model' && <div className="popover model-menu">
-          <div className="menu-heading">Modèle local</div>
-          {availableModels.map(model => <button type="button" className="menu-row" key={model} title={model}
-            onClick={() => { changeSettings({ model }); setMenu('') }}>
-            <span className="model-option">{modelName(model)}{model !== modelName(model) && availableModels.length > 1 && <small>{model}</small>}</span>
-            {settings.model === model && <Check className="menu-check" size={16} />}
-          </button>)}
-          <div className="menu-divider" />
-          <div className="menu-heading">Réflexion</div>
-          {effortLevels.map(level => <button key={level.id} type="button" className="menu-row" onClick={() => { changeSettings({ effort: level.id }); setMenu('') }}>
-            <span className="model-option">{level.label}<small>{level.description}</small></span>
-            {settings.effort === level.id && <Check className="menu-check" size={16} />}
-          </button>)}
-          <div className="menu-divider" />
-          <button type="button" className="menu-row" onClick={() => { setMenu(''); openSettings() }}><Settings2 size={17} /> Configurer le serveur</button>
-        </div>}
-      </div>
+      {modelControl}
       {busy ? <IconButton label="Arrêter la génération" className="send-button" onClick={onStop}><Square size={14} fill="currentColor" /></IconButton>
-        : <button className="icon-button send-button" type="submit" aria-label="Envoyer" title="Envoyer" disabled={!value.trim() && !images.length}><ArrowUp size={21} /></button>}
+        : <button className="icon-button send-button" type="submit" aria-label="Envoyer" title="Envoyer" disabled={reading || (!value.trim() && !hasAttachments)}><ArrowUp size={21} /></button>}
     </div>
   </form>
+}
+
+export function ModelControl({ settings, changeSettings, openSettings, busy, menu, setMenu, inHeader = false }) {
+  const availableModels = settings.models.length ? settings.models : [settings.model]
+  const menuId = inHeader ? 'header-model' : 'model'
+  return <div className={`model-control ${inHeader ? 'header-model' : 'composer-model'}`} data-menu>
+    <button className="model-button" type="button" aria-label="Modèle et niveau de réflexion" aria-expanded={menu === menuId}
+      onClick={() => setMenu(menu === menuId ? '' : menuId)} disabled={busy}>
+      {inHeader && <strong>Ocean</strong>} <span>{modelName(settings.model)}</span> <ChevronDown size={16} />
+    </button>
+    {menu === menuId && <div className="popover model-menu">
+      <div className="menu-heading">Modèle local</div>
+      {availableModels.map(model => <button type="button" className="menu-row" key={model} title={model}
+        onClick={() => { changeSettings({ model }); setMenu('') }}>
+        <span className="model-option">{modelName(model)}{model !== modelName(model) && availableModels.length > 1 && <small>{model}</small>}</span>
+        {settings.model === model && <Check className="menu-check" size={16} />}
+      </button>)}
+      <div className="menu-divider" />
+      <div className="menu-heading">Réflexion</div>
+      {effortLevels.map(level => <button key={level.id} type="button" className="menu-row" onClick={() => { changeSettings({ effort: level.id }); setMenu('') }}>
+        <span className="model-option">{level.label}<small>{level.description}</small></span>
+        {settings.effort === level.id && <Check className="menu-check" size={16} />}
+      </button>)}
+      <div className="menu-divider" />
+      <button type="button" className="menu-row" onClick={openSettings}><Settings2 size={17} /> Paramètres</button>
+    </div>}
+  </div>
 }
 
 export function Modal({ title, onClose, children, className = '' }) {
@@ -169,7 +202,13 @@ export function Modal({ title, onClose, children, className = '' }) {
   </dialog>
 }
 
-export function Setup({ settings, initial, onSave, onClose }) {
+const themes = [
+  { value: 'system', label: 'Système', Icon: Monitor },
+  { value: 'light', label: 'Clair', Icon: Sun },
+  { value: 'dark', label: 'Sombre', Icon: Moon },
+]
+
+export function Setup({ settings, initial, theme, onThemeChange, onSave, onClose }) {
   const [draft, setDraft] = useState(settings)
   const [testing, setTesting] = useState(false)
   const [notice, setNotice] = useState('')
@@ -213,11 +252,19 @@ export function Setup({ settings, initial, onSave, onClose }) {
     }
   }
 
-  const title = initial ? 'Choisis ton IA' : 'Connexion au modèle'
+  const title = initial ? 'Choisis ton IA' : 'Paramètres'
   return <Modal title={title} onClose={onClose} className="setup-modal">
     <div className="setup-symbol"><Network size={23} /></div>
     <h2>{title}</h2>
     <p className="muted">Ocean se connecte à ton serveur depuis ce navigateur.</p>
+    {!initial && <fieldset className="theme-picker">
+      <legend>Apparence</legend>
+      <div className="theme-options">
+        {themes.map(({ value, label, Icon }) => <button type="button" key={value} aria-pressed={theme === value} onClick={() => onThemeChange(value)}>
+          <Icon size={16} /> {label}
+        </button>)}
+      </div>
+    </fieldset>}
     <form className="setup-form" onSubmit={save}>
       <label htmlFor="endpoint">Adresse de l’API locale</label>
       <input id="endpoint" value={draft.endpoint} onChange={event => edit({ endpoint: event.target.value })}

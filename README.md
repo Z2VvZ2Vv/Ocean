@@ -1,6 +1,6 @@
 # Ocean
 
-Assistant IA local avec une interface recréée à partir de [Gemini Web dans Mobbin](https://mobbin.com/screens/0540401f-b84d-4661-a885-7bf9205d5d38). Le navigateur envoie les messages et les images directement à l’API du modèle. Les discussions et les réglages sont conservés dans ce navigateur, séparément pour chaque compte Google.
+Assistant IA local avec une interface recréée à partir de [Gemini Web dans Mobbin](https://mobbin.com/screens/0540401f-b84d-4661-a885-7bf9205d5d38). Le navigateur envoie les messages, le contenu extrait des fichiers et les images directement à l’API du modèle. Les discussions et les réglages du modèle sont conservés dans ce navigateur, séparément pour chaque compte Google.
 
 ## Démarrer sur ton PC
 
@@ -59,5 +59,9 @@ Dans Ocean, indique l’URL HTTPS affichée par Serve, suivie de `/v1`. L’adre
 - **Réflexion** se trouve dans le menu du modèle. Ocean transmet le budget sélectionné et les paramètres de réflexion à l’API compatible llama.cpp. L’effet dépend du moteur et du template de chat.
 - **Python** s’exécute dans un worker isolé du navigateur. Le moteur Pyodide est téléchargé depuis jsDelivr au besoin. **Recherche web** utilise la clé Brave si elle est configurée. Le modèle choisit d’appeler les outils via son template de function calling.
 - **OneNote**. Colle dans le champ du chat. Quand le navigateur reçoit une image avec le texte ou le HTML de la sélection, Ocean joint uniquement l’image. Si OneNote fournit exclusivement du texte au navigateur, utilise une capture Windows (`Win+Maj+S`) et colle-la.
+- **Fichiers**. Utilise **+ → Ajouter des fichiers** ou dépose les fichiers sur le champ de saisie. Ocean lit le texte des PDF et des DOCX, les cellules des XLSX et les fichiers texte courants (TXT, Markdown, CSV, JSON ou code). Les pages de PDF scannées sans texte sont envoyées comme images et nécessitent un modèle compatible vision.
+- **Apparence**. Choisis **Clair**, **Sombre** ou **Système** dans les paramètres. Ocean mémorise le choix dans le navigateur.
+
+Par message, tu peux joindre jusqu’à 4 documents de 12 Mo chacun, avec 45 000 caractères extraits au total. Les PDF sont limités à 100 pages et les pages scannées comptent dans la limite de 4 images par message.
 
 `npm test` vérifie le protocole d’inférence avec un serveur simulé. `npm run build` compile la version de production.
