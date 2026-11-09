@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { LoaderCircle } from 'lucide-react'
-import '@fontsource-variable/inter'
+import '@fontsource-variable/google-sans'
 import './styles.css'
 import { Workspace } from './workspace.jsx'
 import { Brand } from './ui.jsx'
@@ -30,7 +30,7 @@ function loadGoogle() {
   })
 }
 
-function SignIn({ session, onSignIn, onPreview, error }) {
+function SignIn({ session, onSignIn, onPreview, error, theme }) {
   const button = useRef(null)
   const [signInError, setError] = useState('')
   const [working, setWorking] = useState(false)
@@ -39,6 +39,8 @@ function SignIn({ session, onSignIn, onPreview, error }) {
   useEffect(() => {
     if (!session?.clientId) return
     let active = true
+    let renderButton
+    const system = matchMedia('(prefers-color-scheme: dark)')
     loadGoogle().then(google => {
       if (!active) return
       google.initialize({
@@ -52,28 +54,44 @@ function SignIn({ session, onSignIn, onPreview, error }) {
           finally { setWorking(false) }
         },
       })
-      google.renderButton(button.current, { type: 'standard', size: 'large', shape: 'pill', text: 'continue_with', locale: 'fr' })
+      renderButton = () => {
+        const dark = theme === 'dark' || (theme === 'system' && system.matches)
+        button.current.replaceChildren()
+        google.renderButton(button.current, {
+          type: 'standard',
+          theme: dark ? 'outline_dark' : 'outline',
+          size: 'large',
+          shape: 'pill',
+          text: 'continue_with',
+          locale: 'fr',
+        })
+      }
+      renderButton()
+      if (theme === 'system') system.addEventListener('change', renderButton)
     }).catch(problem => { if (active) setError(problem.message) })
-    return () => { active = false }
-  }, [session])
+    return () => {
+      active = false
+      if (renderButton) system.removeEventListener('change', renderButton)
+    }
+  }, [session, theme])
 
   return <div className="signin">
     <header><Brand /></header>
     <main className="signin-center">
-      <div className="halo" />
       <div className="signin-content">
         <img className="signin-star" src="/ocean.svg" alt="" />
         <h1>Bienvenue sur Ocean</h1>
-        <p>Connecte-toi pour discuter avec ton IA locale.</p>
-        <div className="google-button" ref={button} />
-        {!session && !error && <LoaderCircle className="spinner" size={22} aria-label="Chargement" />}
-        {working && <p role="status">Connexion en cours…</p>}
-        {session && !session.clientId && <p className="small">La connexion Google reste à configurer.</p>}
-        {(error || signInError) && <p className="error" role="alert">{error || signInError}</p>}
+        <p className="signin-lead">Ton assistant IA local.</p>
+        <div className="signin-actions">
+          <div className="google-button" ref={button} />
+          {!session && !error && <LoaderCircle className="spinner" size={22} aria-label="Chargement" />}
+          {working && <p className="small" role="status">Connexion en cours…</p>}
+          {session && !session.clientId && <p className="small">La connexion Google reste à configurer.</p>}
+          {(error || signInError) && <p className="error" role="alert">{error || signInError}</p>}
+        </div>
         {import.meta.env.DEV && <button className="secondary-button" onClick={onPreview}>Ouvrir l’aperçu local</button>}
       </div>
     </main>
-    <footer>Ocean · Assistant IA local</footer>
   </div>
 }
 
@@ -117,7 +135,7 @@ function App() {
 
   if (session?.user) return <Workspace key={session.user.id} user={session.user} searchEnabled={session.search} onSignOut={signOut}
     theme={theme} onThemeChange={changeTheme} />
-  return <SignIn session={session} error={error} onSignIn={setSession}
+  return <SignIn session={session} error={error} onSignIn={setSession} theme={theme}
     onPreview={() => setSession({ preview: true, user: { id: 'ocean-local-preview', name: 'Geoff' } })} />
 }
 

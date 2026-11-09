@@ -1,11 +1,23 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { apiBase, defaultSettings, runChat } from '../src/inference.js'
+import { apiBase, defaultSettings, listModels, runChat } from '../src/inference.js'
 
 test('une adresse GGUF ne peut pas être utilisée comme API', () => {
   assert.throws(() => apiBase('http://model.ts.net/etc/model.gguf'), /fichier GGUF/)
   assert.equal(apiBase('https://model.ts.net/v1/models/'), 'https://model.ts.net/v1')
-  assert.equal(apiBase('https://model.ts.net/inference/'), 'https://model.ts.net/inference/v1')
+  assert.equal(apiBase('https://model.ts.net/inference/'), 'https://model.ts.net/inference')
+})
+
+test('la détection essaie /v1 seulement si la route directe est indisponible', async ({ mock }) => {
+  const urls = []
+  mock.method(globalThis, 'fetch', async url => {
+    urls.push(url)
+    if (url.endsWith('/v1/models')) return Response.json({ data: [{ id: 'local' }] })
+    return new Response(null, { status: 404 })
+  })
+  const endpoint = 'https://model.ts.net'
+  assert.deepEqual(await listModels({ endpoint }), ['local'])
+  assert.deepEqual(urls, [`${endpoint}/models`, `${endpoint}/v1/models`])
 })
 
 function stream(...choices) {
@@ -89,4 +101,29 @@ test('les documents restent disponibles au tour suivant et les scans gardent leu
     { type: 'text', text: 'Pièce jointe "Exercice.pdf", page 3' },
     { type: 'image_url', image_url: { url: scan } },
   ])
+})
+
+test('un modèle qui exige xhigh accepte la réflexion approfondie', async ({ mock }) => {
+  const attempts = []
+  mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, `${defaultSettings.endpoint}/chat/completions`)
+    const body = JSON.parse(options.body)
+    attempts.push(body.reasoning_effort)
+    assert.equal(body.thinking_budget_tokens, 8192)
+    if (body.reasoning_effort === 'high') {
+      return Response.json({
+        error: { message: 'Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.' },
+      }, { status: 500 })
+    }
+    return stream({ delta: { content: 'Réponse' }, finish_reason: 'stop' })
+  })
+
+  const result = await runChat({
+    config: { ...defaultSettings, effort: 'high' },
+    messages: [{ role: 'user', text: 'Bonjour' }], tools: [], signal: new AbortController().signal,
+    onTool: () => {}, onUpdate: () => {},
+  })
+
+  assert.deepEqual(attempts, ['high', 'xhigh'])
+  assert.equal(result.text, 'Réponse')
 })

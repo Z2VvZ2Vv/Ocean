@@ -268,7 +268,7 @@ export function Setup({ settings, initial, theme, onThemeChange, onSave, onClose
     <form className="setup-form" onSubmit={save}>
       <label htmlFor="endpoint">Adresse de l’API locale</label>
       <input id="endpoint" value={draft.endpoint} onChange={event => edit({ endpoint: event.target.value })}
-        placeholder="https://machine.ts.net/v1" required disabled={testing} spellCheck={false} />
+        placeholder="https://machine.ts.net" required disabled={testing} spellCheck={false} />
       <label htmlFor="api-key">Clé de l’API <span>facultative</span></label>
       <input id="api-key" type="password" autoComplete="off" value={draft.key} onChange={event => edit({ key: event.target.value })} disabled={testing} />
       <div className="model-field-heading">
@@ -282,7 +282,7 @@ export function Setup({ settings, initial, theme, onThemeChange, onSave, onClose
           {draft.models.map(model => <option key={model} value={model}>{model}</option>)}
         </select>
         : <input id="model-id" value={draft.model} onChange={event => setDraft({ ...draft, model: event.target.value })} disabled={testing} required spellCheck={false} />}
-      <p className="setup-hint"><CircleHelp size={15} /> Avec llama.cpp, utilise l’identifiant annoncé par <code>/v1/models</code>. Les captures nécessitent un modèle compatible vision.</p>
+      <p className="setup-hint"><CircleHelp size={15} /> Détecte les modèles pour récupérer leur identifiant. Les captures nécessitent un modèle compatible vision.</p>
       {notice && <p className="success" role="status"><Check size={15} /> {notice}</p>}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="modal-actions">

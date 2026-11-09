@@ -1,5 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Copy, EllipsisVertical, ExternalLink, LoaderCircle, Menu, Pencil, RotateCw, SquarePen, Trash2 } from 'lucide-react'
+import {
+  Check, ChevronDown, Copy, Ellipsis, EllipsisVertical, ExternalLink, LoaderCircle,
+  Pencil, RotateCw, Share, SquarePen, ThumbsDown, ThumbsUp, Trash2,
+} from 'lucide-react'
 import { Composer, FileChip, IconButton, Modal, ModelControl, Setup, Sidebar } from './ui.jsx'
 import { defaultSettings, runChat } from './inference.js'
 import { chatTools } from './tools.js'
@@ -8,15 +11,40 @@ import { deleteChat, loadWorkspace, saveChat, saveSettings } from './storage.js'
 const Markdown = lazy(() => import('./markdown.jsx'))
 const emptyAttachments = { images: [], documents: [] }
 
-function Answer({ message, generating, progress }) {
+function CopyAction({ label, text }) {
   const [copied, setCopied] = useState(false)
   async function copy() {
     try {
-      await navigator.clipboard.writeText(message.text)
+      await navigator.clipboard.writeText(typeof text === 'function' ? text() : text)
       setCopied(true)
     } catch {
       setCopied(false)
     }
+  }
+
+  return <IconButton label={copied ? 'Copié' : label} onClick={copy}>{copied ? <Check size={19} /> : <Copy size={19} />}</IconButton>
+}
+
+function Answer({ message, generating, progress, onRate, onRegenerate, menu, setMenu }) {
+  const markdown = useRef(null)
+  const [shared, setShared] = useState(false)
+  const menuId = `answer-${message.id}`
+  const text = () => markdown.current?.innerText || message.text
+
+  async function share() {
+    try {
+      if (navigator.share) await navigator.share({ text: text() })
+      else {
+        await navigator.clipboard.writeText(text())
+        setShared(true)
+      }
+    } catch {}
+  }
+
+  async function copyMarkdown() {
+    try { await navigator.clipboard.writeText(message.text) }
+    catch {}
+    finally { setMenu('') }
   }
 
   return <article className="answer">
@@ -27,7 +55,7 @@ function Answer({ message, generating, progress }) {
         <summary>Réflexion <ChevronDown size={14} /></summary>
         <p>{message.reasoning}</p>
       </details>}
-      {message.text && <div className="markdown">
+      {message.text && <div className="markdown" ref={markdown}>
         <Suspense fallback={<p>{message.text}</p>}><Markdown text={message.text} /></Suspense>
       </div>}
       {!generating && !!message.sources?.length && <details className="sources">
@@ -37,13 +65,24 @@ function Answer({ message, generating, progress }) {
         </li>)}</ul>
       </details>}
       {!generating && message.text && <div className="answer-actions">
-        <IconButton label={copied ? 'Réponse copiée' : 'Copier la réponse'} onClick={copy}>{copied ? <Check size={16} /> : <Copy size={16} />}</IconButton>
+        <IconButton label="Réponse utile" aria-pressed={message.rating === 'up'} disabled={!onRate} onClick={() => onRate('up')}><ThumbsUp size={19} /></IconButton>
+        <IconButton label="Réponse peu utile" aria-pressed={message.rating === 'down'} disabled={!onRate} onClick={() => onRate('down')}><ThumbsDown size={19} /></IconButton>
+        {onRegenerate && <IconButton label="Régénérer la réponse" onClick={onRegenerate}><RotateCw size={20} /></IconButton>}
+        <IconButton label={shared ? 'Réponse copiée pour le partage' : 'Partager la réponse'} onClick={share}>{shared ? <Check size={19} /> : <Share size={19} />}</IconButton>
+        <CopyAction label="Copier la réponse" text={text} />
+        <div className="answer-menu-control" data-menu>
+          <IconButton label="Plus d’actions sur la réponse" aria-expanded={menu === menuId} onClick={() => setMenu(menu === menuId ? '' : menuId)}><Ellipsis size={21} /></IconButton>
+          {menu === menuId && <div className="popover answer-menu">
+            <button type="button" className="menu-row" onClick={copyMarkdown}><Copy size={17} /> Copier le Markdown</button>
+          </div>}
+        </div>
       </div>}
     </div>
   </article>
 }
 
-function UserMessage({ message }) {
+function UserMessage({ message, onEdit }) {
+  const [draft, setDraft] = useState(null)
   return <article className="user-message" aria-label="Ton message">
     {!!message.images?.length && <div className="user-images">
       {message.images.map(image => <img key={image.id} src={image.url} alt={image.name} />)}
@@ -51,7 +90,28 @@ function UserMessage({ message }) {
     {!!message.documents?.length && <div className="user-files">
       {message.documents.map(file => <FileChip key={file.id} file={file} />)}
     </div>}
-    {message.text && <div className="user-bubble">{message.text}</div>}
+    {message.text && (draft !== null && onEdit
+      ? <form className="user-edit" onSubmit={event => {
+        event.preventDefault()
+        if (draft.trim()) {
+          onEdit(draft.trim())
+          setDraft(null)
+        }
+      }}>
+        <textarea autoFocus aria-label="Modifier le message" value={draft} onChange={event => setDraft(event.target.value)}
+          onKeyDown={event => { if (event.key === 'Escape') setDraft(null) }} rows={3} />
+        <div className="user-edit-actions">
+          <button className="secondary-button" type="button" onClick={() => setDraft(null)}>Annuler</button>
+          <button className="primary-button" type="submit" disabled={!draft.trim() || draft.trim() === message.text}>Mettre à jour</button>
+        </div>
+      </form>
+      : <>
+        <div className="user-bubble">{message.text}</div>
+        <div className="user-message-actions">
+          <CopyAction label="Copier le message" text={message.text} />
+          {onEdit && <IconButton label="Modifier le message" onClick={() => setDraft(message.text)}><Pencil size={19} /></IconButton>}
+        </div>
+      </>)}
   </article>
 }
 
@@ -80,13 +140,20 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
   const activeChat = chats.find(chat => chat.id === activeId)
   const busy = live !== null
   const messages = live ? [...(activeChat?.messages || []), live] : activeChat?.messages
+  const lastUser = messages?.findLastIndex(message => message.role === 'user')
 
   useEffect(() => {
     let active = true
     loadWorkspace(user.id).then(([savedSettings, savedChats]) => {
       if (!active) return
-      if (savedSettings) setSettings({ ...defaultSettings, ...savedSettings })
-      else setSetup('onboarding')
+      if (savedSettings) {
+        const restored = { ...defaultSettings, ...savedSettings }
+        if (restored.endpoint === `${defaultSettings.endpoint}/v1`) {
+          restored.endpoint = defaultSettings.endpoint
+          void saveSettings(user.id, restored).catch(storageError)
+        }
+        setSettings(restored)
+      } else setSetup('onboarding')
       setChats(savedChats.sort((a, b) => b.updatedAt - a.updatedAt))
     }).catch(() => { if (active) setError('Impossible de lire l’historique local du navigateur.') })
       .finally(() => { if (active) setReady(true) })
@@ -177,7 +244,7 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
     if (matchMedia('(max-width: 849px)').matches) setSideOpen(false)
   }
 
-  async function generate(chat) {
+  async function generate(chat, previousChat) {
     if (request.current) return
     const controller = new AbortController()
     request.current = controller
@@ -200,7 +267,8 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
       })
       storeChat({ ...chat, messages: [...chat.messages, { ...blank, ...response, reasoning: chat.learning ? '' : response.reasoning }], updatedAt: Date.now() })
     } catch (problem) {
-      if (latest.text.trim()) storeChat({ ...chat, messages: [...chat.messages, latest], updatedAt: Date.now() })
+      if (previousChat) storeChat(previousChat)
+      else if (latest.text.trim()) storeChat({ ...chat, messages: [...chat.messages, latest], updatedAt: Date.now() })
       if (!controller.signal.aborted) setError(problem.message || 'La génération a échoué.')
       setRetry(chat)
     } finally {
@@ -225,11 +293,19 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
     void generate(next)
   }
 
-  function retryResponse() {
-    if (attachmentRead.current) return
-    const chat = { ...retry, learning }
+  function retryResponse(source = retry) {
+    if (request.current || attachmentRead.current) return
+    const previousChat = activeChat.messages.at(-1)?.role === 'assistant' ? activeChat : undefined
+    const chat = { ...source, learning }
+    setMenu('')
     storeChat(chat)
-    void generate(chat)
+    void generate(chat, previousChat)
+  }
+
+  function rate(message, rating) {
+    if (request.current) return
+    storeChat({ ...activeChat, messages: activeChat.messages.map(item => item.id === message.id
+      ? { ...item, rating: item.rating === rating ? undefined : rating } : item) })
   }
 
   function handleDialog(event) {
@@ -263,7 +339,9 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
     <main className={`stage ${activeChat ? 'conversation' : 'home'}`}>
       {!activeChat && <div className="halo" />}
       <header className="stage-header">
-        <IconButton label="Ouvrir le menu" className="mobile-header-control" onClick={() => setSideOpen(!sideOpen)} aria-expanded={sideOpen}><Menu size={23} /></IconButton>
+        <IconButton label="Ouvrir le menu" className="mobile-header-control" onClick={() => setSideOpen(!sideOpen)} aria-expanded={sideOpen}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" aria-hidden="true"><path d="M3 8h18M3 16h18" /></svg>
+        </IconButton>
         <ModelControl {...modelProps} inHeader />
         <IconButton label="Nouvelle discussion" className="mobile-header-control header-new-chat" onClick={() => openChat()} disabled={busy}><SquarePen size={21} /></IconButton>
         {activeChat && <div className="chat-menu-control" data-menu>
@@ -279,16 +357,21 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
         follow.current = scrollHeight - scrollTop - clientHeight < 90
       }}>
         <div className="messages">
-          {messages.map(message => message.role === 'user'
-            ? <UserMessage key={message.id} message={message} />
-            : <Answer key={message.id} message={message} generating={message.id === live?.id} progress={progress} />)}
+          {messages.map((message, index) => message.role === 'user'
+            ? <UserMessage key={message.id} message={message} onEdit={!busy && !reading && index === lastUser
+              ? text => retryResponse({ ...activeChat, messages: [...messages.slice(0, index), { ...message, text }] })
+              : undefined} />
+            : <Answer key={message.id} message={message} generating={message.id === live?.id} progress={progress}
+              onRate={busy ? undefined : rating => rate(message, rating)} menu={menu} setMenu={setMenu}
+              onRegenerate={!busy && !reading && !retry && index === messages.length - 1
+                ? () => retryResponse({ ...activeChat, messages: messages.slice(0, index) }) : undefined} />)}
           {!busy && <p className="mobile-disclaimer">Ocean peut se tromper. Pense à vérifier ses réponses.</p>}
         </div>
       </div>}
       <div className="composer-dock">
         {!activeChat && <h1>{learning ? 'Qu’aimerais-tu apprendre ?' : 'Par quoi commencer ?'}</h1>}
         {error && <div className="chat-error" role="alert">{error}</div>}
-        {retry && !busy && <button type="button" className="retry-button" onClick={retryResponse} disabled={reading}><RotateCw size={15} /> Réessayer</button>}
+        {retry && !busy && <button type="button" className="retry-button" onClick={() => retryResponse()} disabled={reading}><RotateCw size={15} /> Réessayer</button>}
         {ready ? <Composer value={value} setValue={setValue} attachments={attachments} setAttachments={setAttachments}
           onAttach={attach} reading={reading} learning={learning} setLearning={changeLearning} onSubmit={submit}
           onStop={() => request.current?.abort()} busy={busy} menu={menu} setMenu={setMenu} modelControl={<ModelControl {...modelProps} />} />

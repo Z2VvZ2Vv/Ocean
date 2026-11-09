@@ -30,7 +30,7 @@ Chaque domaine de preview utilisé avec Google doit être déclaré comme origin
 
 ## Relier Qwen à Ocean sur Tailscale
 
-Le fichier `Swift-1.5-Qwen3.8-27B-Q8_0.gguf` contient les poids. Une API d’inférence doit le charger et exposer `GET /v1/models` ainsi que `POST /v1/chat/completions`. Si tu as déjà ce service, ajoute l’origine Ocean à ses origines CORS et saisis l’URL de l’API dans **Paramètres**.
+Le fichier `Swift-1.5-Qwen3.8-27B-Q8_0.gguf` contient les poids. Une API d’inférence doit le charger et exposer les routes `GET /models` et `POST /chat/completions` depuis son URL de base. Si tu as déjà ce service, ajoute l’origine Ocean à ses origines CORS et saisis l’URL de l’API dans **Paramètres**.
 
 Exemple sur Pop!_OS avec une version récente de llama.cpp, si le fichier GGUF se trouve au chemin indiqué. Adapte les paramètres de contexte et d’accélération à la machine.
 
@@ -51,7 +51,7 @@ Dans un autre terminal sur Pop!_OS, rends l’API accessible en HTTPS aux appare
 tailscale serve --bg http://127.0.0.1:8081
 ```
 
-Dans Ocean, indique l’URL HTTPS affichée par Serve, suivie de `/v1`. L’adresse préremplie est `https://pop-os-comfyui.tail917fd3.ts.net/v1`. Clique sur **Détecter les modèles** et autorise l’accès réseau local si le navigateur te le demande. Le PC où Ocean est ouvert doit être connecté à Tailscale. Voir [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve), [l’accès réseau local dans Chrome](https://developer.chrome.com/docs/modern-web-guidance/guides/security/local-network-access) et [la configuration de llama.cpp](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md).
+L’adresse préremplie dans Ocean est `http://pop-os-comfyui.tail917fd3.ts.net:8080`. Si tu utilises Tailscale Serve, tu peux saisir l’URL HTTPS qu’il affiche. Clique sur **Détecter les modèles** et autorise l’accès réseau local si le navigateur te le demande. Le PC où Ocean est ouvert doit être connecté à Tailscale. Voir [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve), [l’accès réseau local dans Chrome](https://developer.chrome.com/docs/modern-web-guidance/guides/security/local-network-access) et [la configuration de llama.cpp](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md).
 
 ## Utiliser les outils
 

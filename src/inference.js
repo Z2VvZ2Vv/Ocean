@@ -1,5 +1,5 @@
 export const defaultSettings = {
-  endpoint: 'https://pop-os-comfyui.tail917fd3.ts.net/v1',
+  endpoint: 'http://pop-os-comfyui.tail917fd3.ts.net:8080',
   key: '',
   model: 'Qwen3.8',
   models: [],
@@ -18,7 +18,7 @@ export function apiBase(input) {
   try {
     url = new URL(input.trim())
   } catch {
-    throw new Error('Saisis une adresse complète, par exemple https://machine.ts.net/v1.')
+    throw new Error('Saisis une adresse complète, par exemple https://machine.ts.net.')
   }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
     throw new Error('Utilise une URL HTTP ou HTTPS, sans identifiants ni paramètres.')
@@ -27,7 +27,7 @@ export function apiBase(input) {
     throw new Error('Cette adresse pointe vers un fichier GGUF. Saisis l’adresse de l’API qui charge ce fichier.')
   }
   const path = url.pathname.replace(/\/+$/, '').replace(/\/(chat\/completions|models)$/, '')
-  return url.origin + (path.endsWith('/v1') ? path : `${path}/v1`)
+  return url.origin + path
 }
 
 export function modelName(id) {
@@ -45,13 +45,18 @@ async function inferenceFetch(config, path, { signal, body } = {}) {
   const httpOptions = url.protocol === 'http:' ? { targetAddressSpace: isLoopback ? 'loopback' : 'local' } : {}
   const timeout = AbortSignal.timeout(body ? 300000 : 12000)
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
+  const request = {
+    ...httpOptions, headers, signal: requestSignal,
+    method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
+    credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
+  }
   let response
   try {
-    response = await fetch(base + path, {
-      ...httpOptions, headers, signal: requestSignal,
-      method: body ? 'POST' : 'GET', body: body ? JSON.stringify(body) : undefined,
-      credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
-    })
+    response = await fetch(base + path, request)
+    if ([404, 405].includes(response.status) && !base.endsWith('/v1')) {
+      await response.body?.cancel()
+      response = await fetch(`${base}/v1${path}`, request)
+    }
   } catch (error) {
     if (signal?.aborted) throw error
     if (timeout.aborted) throw new Error('Le serveur IA a mis trop de temps à répondre.')
@@ -59,8 +64,9 @@ async function inferenceFetch(config, path, { signal, body } = {}) {
   }
   if (!response.ok) {
     const data = await response.json().catch(() => null)
-    const detail = typeof data?.error?.message === 'string' ? ` ${data.error.message.slice(0, 350)}` : ''
-    throw new Error(`Le serveur IA a répondu HTTP ${response.status}.${detail}`)
+    const detail = typeof data?.error?.message === 'string' ? data.error.message : ''
+    const summary = detail ? ` ${detail.slice(0, 350)}` : ''
+    throw new Error(`Le serveur IA a répondu HTTP ${response.status}.${summary}`, { cause: detail })
   }
   return response
 }
@@ -106,19 +112,30 @@ function splitThinking(content) {
   return { text: content.slice(0, open) + content.slice(close + 8).trimStart(), thought: content.slice(open + 7, close) }
 }
 
-async function completion(config, messages, tools, signal, onUpdate) {
-  const effort = effortLevels.find(level => level.id === config.effort) || effortLevels[2]
+function compatibleEffort(error, requested) {
+  const fallback = requested === 'high' ? 'xhigh' : requested === 'none' ? 'low' : undefined
+  if (!fallback || typeof error.cause !== 'string') return undefined
+  const rejection = error.cause.match(/Unexpected reasoning effort (\w+)\.\s*Supported types are ([^.\r\n]+)/i)
+  if (rejection?.[1] === requested && rejection[2].match(/\b\w+\b/g)?.includes(fallback)) return fallback
+}
+
+async function completion(config, messages, tools, effort, signal, onUpdate) {
   const body = {
     model: config.model,
     messages,
     stream: true,
     max_tokens: effort.budget + 4096,
-    reasoning_effort: effort.id,
+    reasoning_effort: effort.apiId,
     thinking_budget_tokens: effort.budget,
     chat_template_kwargs: { enable_thinking: effort.id !== 'none' },
   }
   if (tools.length) Object.assign(body, { tools, tool_choice: 'auto' })
-  const response = await inferenceFetch(config, '/chat/completions', { body, signal })
+  const response = await inferenceFetch(config, '/chat/completions', { body, signal }).catch(error => {
+    const fallback = compatibleEffort(error, effort.apiId)
+    if (!fallback) throw error
+    effort.apiId = fallback
+    return inferenceFetch(config, '/chat/completions', { body: { ...body, reasoning_effort: fallback }, signal })
+  })
   const streaming = response.headers.get('content-type')?.includes('text/event-stream')
   const chunks = streaming ? events(response.body) : [await response.json()]
   let raw = ''
@@ -150,6 +167,7 @@ async function completion(config, messages, tools, signal, onUpdate) {
 
 export const learningPrompt = `Tu es un tuteur socratique en mode Apprentissage guidé.
 Commence par une question ciblée pour situer l’élève, puis avance par petites étapes.
+Va directement à l’indice ou à la question utile en quelques phrases. Évite les préambules qui rappellent le mode ou commentent l’envie d’obtenir la réponse.
 Pour un exercice, ne révèle ni le résultat final ni une solution complète, même si on te les demande.
 Donne un indice à la fois ou un exemple analogue avec des données différentes, puis attends une tentative.
 Quand l’élève propose une solution, vérifie son raisonnement, explique l’étape à revoir et laisse-le corriger.
@@ -192,9 +210,11 @@ export async function runChat({ config, messages, learning, tools, signal, onUpd
   ].filter(Boolean).join('\n\n')
   const history = [{ role: 'system', content: system }, ...messages.map(toApiMessage)]
   const sources = new Map()
+  const level = effortLevels.find(item => item.id === config.effort) || effortLevels[2]
+  const effort = { ...level, apiId: level.id }
   const maxToolRounds = 5
   for (let round = 0; round <= maxToolRounds; round++) {
-    const result = await completion(config, history, round === maxToolRounds ? [] : descriptions, signal, onUpdate)
+    const result = await completion(config, history, round === maxToolRounds ? [] : descriptions, effort, signal, onUpdate)
     if (result.finishReason === 'length') throw new Error('Le modèle a atteint sa limite de génération.')
     if (!result.calls.length) {
       if (!result.text.trim()) throw new Error('Le modèle a renvoyé une réponse vide.')
