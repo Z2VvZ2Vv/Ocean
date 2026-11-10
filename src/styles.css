@@ -413,7 +413,7 @@ details[open] summary svg { transform: rotate(180deg); }
   .answer-actions { margin-left: -7px; gap: clamp(4px, 1.3vw, 9px); }
   .answer-actions, .user-message-actions { color: light-dark(#57595b, #d4d4d4); }
   .answer-menu { left: auto; right: -34px; }
-  .conversation .composer-dock { width: calc(100% - 20px); margin-bottom: max(9px, env(safe-area-inset-bottom)); }
+  .conversation .composer-dock { width: calc(100% - 20px); margin-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
   .composer { min-height: clamp(55px, 11.5vw, 76px); border-radius: 999px; padding: 7px clamp(10px, 2.5vw, 17px); }
   .composer.multiline { padding-block: 10px; }
   .composer textarea { font-size: 17px; }
