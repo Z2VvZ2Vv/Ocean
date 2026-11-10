@@ -7,9 +7,9 @@ export const defaultSettings = {
 }
 
 export const effortLevels = [
-  { id: 'low', label: 'Low', budget: 512 },
-  { id: 'medium', label: 'Medium', budget: 2048 },
-  { id: 'xhigh', label: 'High', budget: 8192 },
+  { id: 'low', label: 'Bas', description: 'Rapide et efficace', budget: 512 },
+  { id: 'medium', label: 'Moyen', description: 'Équilibré', budget: 2048 },
+  { id: 'xhigh', label: 'Élevé', description: 'Très poussé', budget: 8192 },
 ]
 
 export function getEffortLevel(id) {
