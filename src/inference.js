@@ -3,15 +3,19 @@ export const defaultSettings = {
   key: '',
   model: 'Qwen3.8',
   models: [],
-  effort: 'medium',
+  effort: 'xhigh',
 }
 
 export const effortLevels = [
-  { id: 'none', label: 'Rapide', description: 'Sans réflexion prolongée', budget: 0 },
-  { id: 'low', label: 'Légère', description: '512 jetons de réflexion', budget: 512 },
-  { id: 'medium', label: 'Standard', description: '2 048 jetons de réflexion', budget: 2048 },
-  { id: 'high', label: 'Approfondie', description: '8 192 jetons de réflexion', budget: 8192 },
+  { id: 'low', label: 'Low', budget: 512 },
+  { id: 'medium', label: 'Medium', budget: 2048 },
+  { id: 'xhigh', label: 'High', budget: 8192 },
 ]
+
+export function getEffortLevel(id) {
+  const selected = id === 'none' ? 'low' : id
+  return effortLevels.find(level => level.id === selected) || effortLevels.at(-1)
+}
 
 export function apiBase(input) {
   let url
@@ -66,7 +70,7 @@ async function inferenceFetch(config, path, { signal, body } = {}) {
     const data = await response.json().catch(() => null)
     const detail = typeof data?.error?.message === 'string' ? data.error.message : ''
     const summary = detail ? ` ${detail.slice(0, 350)}` : ''
-    throw new Error(`Le serveur IA a répondu HTTP ${response.status}.${summary}`, { cause: detail })
+    throw new Error(`Le serveur IA a répondu HTTP ${response.status}.${summary}`)
   }
   return response
 }
@@ -112,30 +116,18 @@ function splitThinking(content) {
   return { text: content.slice(0, open) + content.slice(close + 8).trimStart(), thought: content.slice(open + 7, close) }
 }
 
-function compatibleEffort(error, requested) {
-  const fallback = requested === 'high' ? 'xhigh' : requested === 'none' ? 'low' : undefined
-  if (!fallback || typeof error.cause !== 'string') return undefined
-  const rejection = error.cause.match(/Unexpected reasoning effort (\w+)\.\s*Supported types are ([^.\r\n]+)/i)
-  if (rejection?.[1] === requested && rejection[2].match(/\b\w+\b/g)?.includes(fallback)) return fallback
-}
-
 async function completion(config, messages, tools, effort, signal, onUpdate) {
   const body = {
     model: config.model,
     messages,
     stream: true,
     max_tokens: effort.budget + 4096,
-    reasoning_effort: effort.apiId,
+    reasoning_effort: effort.id,
     thinking_budget_tokens: effort.budget,
-    chat_template_kwargs: { enable_thinking: effort.id !== 'none' },
+    chat_template_kwargs: { enable_thinking: true },
   }
   if (tools.length) Object.assign(body, { tools, tool_choice: 'auto' })
-  const response = await inferenceFetch(config, '/chat/completions', { body, signal }).catch(error => {
-    const fallback = compatibleEffort(error, effort.apiId)
-    if (!fallback) throw error
-    effort.apiId = fallback
-    return inferenceFetch(config, '/chat/completions', { body: { ...body, reasoning_effort: fallback }, signal })
-  })
+  const response = await inferenceFetch(config, '/chat/completions', { body, signal })
   const streaming = response.headers.get('content-type')?.includes('text/event-stream')
   const chunks = streaming ? events(response.body) : [await response.json()]
   let raw = ''
@@ -210,8 +202,7 @@ export async function runChat({ config, messages, learning, tools, signal, onUpd
   ].filter(Boolean).join('\n\n')
   const history = [{ role: 'system', content: system }, ...messages.map(toApiMessage)]
   const sources = new Map()
-  const level = effortLevels.find(item => item.id === config.effort) || effortLevels[2]
-  const effort = { ...level, apiId: level.id }
+  const effort = getEffortLevel(config.effort)
   const maxToolRounds = 5
   for (let round = 0; round <= maxToolRounds; round++) {
     const result = await completion(config, history, round === maxToolRounds ? [] : descriptions, effort, signal, onUpdate)

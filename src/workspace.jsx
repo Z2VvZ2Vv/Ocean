@@ -4,7 +4,7 @@ import {
   Pencil, RotateCw, Share, SquarePen, ThumbsDown, ThumbsUp, Trash2,
 } from 'lucide-react'
 import { Composer, FileChip, IconButton, Modal, ModelControl, Setup, Sidebar } from './ui.jsx'
-import { defaultSettings, runChat } from './inference.js'
+import { defaultSettings, getEffortLevel, runChat } from './inference.js'
 import { chatTools } from './tools.js'
 import { deleteChat, loadWorkspace, saveChat, saveSettings } from './storage.js'
 
@@ -123,7 +123,7 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
   const [ready, setReady] = useState(false)
   const [setup, setSetup] = useState('')
   const [menu, setMenu] = useState('')
-  const [dialog, setDialog] = useState('')
+  const [dialog, setDialog] = useState(null)
   const [titleDraft, setTitleDraft] = useState('')
   const [value, setValue] = useState('')
   const [attachments, setAttachments] = useState(emptyAttachments)
@@ -138,6 +138,9 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
   const transcript = useRef(null)
   const follow = useRef(true)
   const activeChat = chats.find(chat => chat.id === activeId)
+  const dialogChat = dialog && chats.find(chat => chat.id === dialog.chatId)
+  const renaming = dialog?.type === 'rename'
+  const dialogTitle = renaming ? 'Renommer la discussion' : 'Supprimer la discussion ?'
   const busy = live !== null
   const messages = live ? [...(activeChat?.messages || []), live] : activeChat?.messages
   const lastUser = messages?.findLastIndex(message => message.role === 'user')
@@ -148,8 +151,11 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
       if (!active) return
       if (savedSettings) {
         const restored = { ...defaultSettings, ...savedSettings }
-        if (restored.endpoint === `${defaultSettings.endpoint}/v1`) {
-          restored.endpoint = defaultSettings.endpoint
+        const legacyEndpoint = restored.endpoint === `${defaultSettings.endpoint}/v1`
+        const effort = getEffortLevel(restored.effort).id
+        if (legacyEndpoint || effort !== restored.effort) {
+          if (legacyEndpoint) restored.endpoint = defaultSettings.endpoint
+          restored.effort = effort
           void saveSettings(user.id, restored).catch(storageError)
         }
         setSettings(restored)
@@ -308,17 +314,34 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
       ? { ...item, rating: item.rating === rating ? undefined : rating } : item) })
   }
 
-  function handleDialog(event) {
+  function confirmDelete(chatId) {
+    setDialog({ type: 'delete', chatId })
+    setMenu('')
+  }
+
+  function closeDialog() {
+    if (!dialog?.pending) setDialog(null)
+  }
+
+  async function handleDialog(event) {
     event.preventDefault()
-    if (dialog === 'rename') {
+    if (!dialogChat || dialog.pending) return
+    if (renaming) {
       if (!titleDraft.trim()) return
-      storeChat({ ...activeChat, title: titleDraft.trim() })
-    } else {
-      setChats(current => current.filter(chat => chat.id !== activeId))
-      void deleteChat(user.id, activeId).catch(storageError)
-      openChat()
+      storeChat({ ...dialogChat, title: titleDraft.trim() })
+      closeDialog()
+      return
     }
-    setDialog('')
+
+    setDialog({ ...dialog, pending: true, error: '' })
+    try {
+      await deleteChat(user.id, dialogChat.id)
+      setChats(current => current.filter(chat => chat.id !== dialogChat.id))
+      if (dialogChat.id === activeId) openChat()
+      setDialog(null)
+    } catch {
+      setDialog({ ...dialog, error: 'Impossible de supprimer cette discussion. Réessaie.' })
+    }
   }
 
   async function signOut() {
@@ -333,7 +356,7 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
   const modelProps = { settings, changeSettings, openSettings, busy: busy || !ready, menu, setMenu }
   return <div className={`workspace ${sideOpen ? 'nav-open' : ''}`}>
     <Sidebar user={user} open={sideOpen} toggle={() => setSideOpen(!sideOpen)}
-      chats={chats} activeId={activeId} onNew={() => openChat()} onOpen={openChat} onSettings={openSettings}
+      chats={chats} activeId={activeId} onNew={() => openChat()} onOpen={openChat} onDelete={confirmDelete} onSettings={openSettings}
       onSignOut={signOut} busy={busy} menu={menu} setMenu={setMenu} />
     {sideOpen && <button className="mobile-overlay" type="button" aria-label="Réduire le menu" onClick={() => setSideOpen(false)} />}
     <main className={`stage ${activeChat ? 'conversation' : 'home'}`}>
@@ -347,8 +370,12 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
         {activeChat && <div className="chat-menu-control" data-menu>
           <IconButton label="Options de la discussion" onClick={() => setMenu(menu === 'chat' ? '' : 'chat')} aria-expanded={menu === 'chat'} disabled={busy}><EllipsisVertical size={21} /></IconButton>
           {menu === 'chat' && <div className="popover chat-menu">
-            <button type="button" className="menu-row" onClick={() => { setTitleDraft(activeChat.title); setDialog('rename'); setMenu('') }}><Pencil size={16} /> Renommer</button>
-            <button type="button" className="menu-row danger-text" onClick={() => { setDialog('delete'); setMenu('') }}><Trash2 size={16} /> Supprimer</button>
+            <button type="button" className="menu-row" onClick={() => {
+              setTitleDraft(activeChat.title)
+              setDialog({ type: 'rename', chatId: activeId })
+              setMenu('')
+            }}><Pencil size={16} /> Renommer</button>
+            <button type="button" className="menu-row danger-text" onClick={() => confirmDelete(activeId)}><Trash2 size={16} /> Supprimer</button>
           </div>}
         </div>}
       </header>
@@ -381,15 +408,16 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
     </main>
     {setup && <Setup settings={settings} initial={setup === 'onboarding'} theme={theme} onThemeChange={onThemeChange} onSave={next => { changeSettings(next); setSetup('') }}
       onClose={() => { if (setup === 'onboarding') changeSettings(settings); setSetup('') }} />}
-    {dialog && <Modal title={dialog === 'rename' ? 'Renommer la discussion' : 'Supprimer la discussion ?'} onClose={() => setDialog('')}>
+    {dialogChat && <Modal title={dialogTitle} onClose={closeDialog}>
       <form className="confirm-form" onSubmit={handleDialog}>
-        <h2>{dialog === 'rename' ? 'Renommer la discussion' : 'Supprimer la discussion ?'}</h2>
-        {dialog === 'rename'
+        <h2>{dialogTitle}</h2>
+        {renaming
           ? <input aria-label="Titre" autoFocus required maxLength={120} value={titleDraft} onChange={event => setTitleDraft(event.target.value)} />
-          : <p className="muted">« {activeChat.title} » sera supprimée de ce navigateur.</p>}
+          : <p className="muted">« {dialogChat.title} » sera supprimée de ce navigateur.</p>}
+        {dialog.error && <p className="error" role="alert">{dialog.error}</p>}
         <div className="modal-actions">
-          <button className="secondary-button" type="button" onClick={() => setDialog('')}>Annuler</button>
-          <button className={dialog === 'rename' ? 'primary-button' : 'delete-button'} type="submit">{dialog === 'rename' ? 'Enregistrer' : 'Supprimer'}</button>
+          <button className="secondary-button" type="button" autoFocus={!renaming} disabled={dialog.pending} onClick={closeDialog}>Annuler</button>
+          <button className={renaming ? 'primary-button' : 'delete-button'} type="submit" disabled={dialog.pending}>{renaming ? 'Enregistrer' : 'Supprimer'}</button>
         </div>
       </form>
     </Modal>}

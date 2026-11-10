@@ -52,7 +52,7 @@ test('une image seule et les résultats des outils repartent directement vers le
 
   const updates = []
   const answer = await runChat({
-    config: { ...defaultSettings, endpoint: 'https://model.ts.net/v1', effort: 'high' },
+    config: { ...defaultSettings, endpoint: 'https://model.ts.net/v1', effort: 'xhigh' },
     messages: [{ role: 'user', text: '', images: [{ url: image }] }],
     learning: true,
     signal: new AbortController().signal,
@@ -103,27 +103,23 @@ test('les documents restent disponibles au tour suivant et les scans gardent leu
   ])
 })
 
-test('un modèle qui exige xhigh accepte la réflexion approfondie', async ({ mock }) => {
-  const attempts = []
+test('la réflexion utilise uniquement low, medium et xhigh dès la première requête', async ({ mock }) => {
+  const efforts = []
   mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(url, `${defaultSettings.endpoint}/chat/completions`)
     const body = JSON.parse(options.body)
-    attempts.push(body.reasoning_effort)
-    assert.equal(body.thinking_budget_tokens, 8192)
-    if (body.reasoning_effort === 'high') {
-      return Response.json({
-        error: { message: 'Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.' },
-      }, { status: 500 })
-    }
+    efforts.push(body.reasoning_effort)
+    assert.equal(body.chat_template_kwargs.enable_thinking, true)
     return stream({ delta: { content: 'Réponse' }, finish_reason: 'stop' })
   })
 
-  const result = await runChat({
-    config: { ...defaultSettings, effort: 'high' },
-    messages: [{ role: 'user', text: 'Bonjour' }], tools: [], signal: new AbortController().signal,
-    onTool: () => {}, onUpdate: () => {},
-  })
+  for (const effort of [defaultSettings.effort, 'low', 'medium', 'xhigh', 'high', 'none']) {
+    await runChat({
+      config: { ...defaultSettings, effort },
+      messages: [{ role: 'user', text: 'Bonjour' }], tools: [], signal: new AbortController().signal,
+      onTool: () => {}, onUpdate: () => {},
+    })
+  }
 
-  assert.deepEqual(attempts, ['high', 'xhigh'])
-  assert.equal(result.text, 'Réponse')
+  assert.deepEqual(efforts, ['xhigh', 'low', 'medium', 'xhigh', 'xhigh', 'low'])
 })

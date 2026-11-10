@@ -72,8 +72,11 @@ button { -webkit-tap-highlight-color: transparent; }
 .nav-button:disabled, .history-button:disabled { opacity: .56; }
 .history { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }
 .sidebar-caption { padding: 24px 10px 8px; font-size: 12px; color: var(--muted); }
+.history-row { display: flex; align-items: center; border-radius: 20px; }
 .history-button { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.history-button.selected { font-weight: 550; }
+.history-row.selected .history-button { font-weight: 550; }
+.history-delete { flex: 0 0 34px; width: 34px; height: 34px; color: var(--muted); }
+.history-delete:hover:not(:disabled) { color: var(--error); }
 .empty-history { color: var(--muted); padding: 4px 10px; font-size: 12px; }
 .history-search { width: calc(100% - 12px); margin: 8px 6px 0; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); padding: 8px 10px; font-size: 13px; }
 .sidebar-bottom { margin-top: auto; padding-top: 8px; }

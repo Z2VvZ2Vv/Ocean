@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ArrowUp, BookOpen, Check, ChevronDown, CircleHelp, FileText, LoaderCircle,
-  LogOut, Monitor, Moon, Network, PanelLeft, Paperclip, Plus, Search, Settings2, Square, SquarePen, Sun, X,
+  LogOut, Monitor, Moon, Network, PanelLeft, Paperclip, Plus, Search, Settings2, Square, SquarePen, Sun, Trash2, X,
 } from 'lucide-react'
 import { maxImages, pastedImages } from './clipboard.js'
 import { attachmentTypes, imageSlots, readAttachments } from './attachments.js'
@@ -15,7 +15,7 @@ export function IconButton({ label, className = '', children, ...props }) {
   return <button type="button" className={`icon-button ${className}`} aria-label={label} title={label} {...props}>{children}</button>
 }
 
-export function Sidebar({ user, open, toggle, chats, activeId, onNew, onOpen, onSettings, onSignOut, busy, menu, setMenu }) {
+export function Sidebar({ user, open, toggle, chats, activeId, onNew, onOpen, onDelete, onSettings, onSignOut, busy, menu, setMenu }) {
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const shownChats = chats.filter(chat => !query || chat.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
@@ -38,8 +38,13 @@ export function Sidebar({ user, open, toggle, chats, activeId, onNew, onOpen, on
     {open && <div className="history">
       {searching && <input className="history-search" aria-label="Rechercher des discussions" autoFocus placeholder="Rechercher…" value={query} onChange={event => setQuery(event.target.value)} />}
       <div className="sidebar-caption">{searching ? 'Résultats' : 'Récentes'}</div>
-      {shownChats.map(chat => <button key={chat.id} type="button" className={`history-button ${activeId === chat.id ? 'selected' : ''}`}
-        title={chat.title} disabled={busy && chat.id !== activeId} onClick={() => onOpen(chat.id)}>{chat.title}</button>)}
+      {shownChats.map(chat => <div key={chat.id} className={`history-row ${activeId === chat.id ? 'selected' : ''}`}>
+        <button type="button" className="history-button" aria-current={activeId === chat.id ? true : undefined}
+          title={chat.title} disabled={busy && chat.id !== activeId} onClick={() => onOpen(chat.id)}>{chat.title}</button>
+        <IconButton label={`Supprimer « ${chat.title} »`} className="history-delete" disabled={busy} onClick={() => onDelete(chat.id)}>
+          <Trash2 size={16} />
+        </IconButton>
+      </div>)}
       {!shownChats.length && <p className="empty-history">{query ? 'Aucun résultat' : 'Aucune discussion pour le moment'}</p>}
     </div>}
     <div className="sidebar-bottom">
@@ -183,7 +188,7 @@ export function ModelControl({ settings, changeSettings, openSettings, busy, men
       <div className="menu-divider" />
       <div className="menu-heading">Réflexion</div>
       {effortLevels.map(level => <button key={level.id} type="button" className="menu-row" onClick={() => { changeSettings({ effort: level.id }); setMenu('') }}>
-        <span className="model-option">{level.label}<small>{level.description}</small></span>
+        {level.label}
         {settings.effort === level.id && <Check className="menu-check" size={16} />}
       </button>)}
       <div className="menu-divider" />
