@@ -3,7 +3,7 @@ import {
   Check, ChevronDown, Copy, Ellipsis, EllipsisVertical, ExternalLink, LoaderCircle,
   Pencil, RotateCw, Share, SquarePen, ThumbsDown, ThumbsUp, Trash2,
 } from 'lucide-react'
-import { Composer, EffortControl, FileChip, IconButton, Modal, ModelControl, Setup, Sidebar } from './ui.jsx'
+import { Composer, FileChip, IconButton, Modal, ModelControl, Setup, Sidebar } from './ui.jsx'
 import { defaultSettings, getEffortLevel, runChat } from './inference.js'
 import { chatTools } from './tools.js'
 import { deleteChat, loadWorkspace, saveChat, saveSettings } from './storage.js'
@@ -401,8 +401,7 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
         {retry && !busy && <button type="button" className="retry-button" onClick={() => retryResponse()} disabled={reading}><RotateCw size={15} /> Réessayer</button>}
         {ready ? <Composer value={value} setValue={setValue} attachments={attachments} setAttachments={setAttachments}
           onAttach={attach} reading={reading} learning={learning} setLearning={changeLearning} onSubmit={submit}
-          onStop={() => request.current?.abort()} busy={busy} menu={menu} setMenu={setMenu}
-          modelControls={<><ModelControl {...modelProps} /><EffortControl {...modelProps} /></>} />
+          onStop={() => request.current?.abort()} busy={busy} menu={menu} setMenu={setMenu} modelControl={<ModelControl {...modelProps} />} />
           : <LoaderCircle className="spinner" size={22} aria-label="Chargement" />}
       </div>
       {activeChat && <footer className="chat-footer">Ocean peut se tromper. Pense à vérifier ses réponses.</footer>}

@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { maxImages, pastedImages } from './clipboard.js'
 import { attachmentTypes, imageSlots, readAttachments } from './attachments.js'
-import { apiBase, effortLevels, getEffortLevel, listModels, modelName } from './inference.js'
+import { apiBase, effortLevels, listModels, modelName } from './inference.js'
 
 export function Brand() {
   return <span className="brand"><img src="/ocean.svg" alt="" /> Ocean</span>
@@ -79,7 +79,7 @@ export function FileChip({ file, onRemove }) {
 
 export function Composer({
   value, setValue, attachments, setAttachments, onAttach, reading, learning, setLearning,
-  onSubmit, onStop, busy, menu, setMenu, modelControls,
+  onSubmit, onStop, busy, menu, setMenu, modelControl,
 }) {
   const { images, documents } = attachments
   const field = useRef(null)
@@ -163,7 +163,7 @@ export function Composer({
         }
       }} />
     <div className="composer-actions">
-      {modelControls}
+      {modelControl}
       {busy ? <IconButton label="Arrêter la génération" className="send-button" onClick={onStop}><Square size={14} fill="currentColor" /></IconButton>
         : <button className="icon-button send-button" type="submit" aria-label="Envoyer" title="Envoyer" disabled={reading || (!value.trim() && !hasAttachments)}><ArrowUp size={21} /></button>}
     </div>
@@ -174,7 +174,7 @@ export function ModelControl({ settings, changeSettings, openSettings, busy, men
   const availableModels = settings.models.length ? settings.models : [settings.model]
   const menuId = inHeader ? 'header-model' : 'model'
   return <div className={`model-control ${inHeader ? 'header-model' : 'composer-model'}`} data-menu>
-    <button className="model-button" type="button" aria-label="Choisir le modèle" aria-expanded={menu === menuId}
+    <button className="model-button" type="button" aria-label="Modèle et niveau de réflexion" aria-expanded={menu === menuId}
       onClick={() => setMenu(menu === menuId ? '' : menuId)} disabled={busy}>
       {inHeader && <strong>Ocean</strong>} <span>{modelName(settings.model)}</span> <ChevronDown size={16} />
     </button>
@@ -186,34 +186,14 @@ export function ModelControl({ settings, changeSettings, openSettings, busy, men
         {settings.model === model && <Check className="menu-check" size={16} />}
       </button>)}
       <div className="menu-divider" />
-      <button type="button" className="menu-row" onClick={openSettings}><Settings2 size={17} /> Paramètres</button>
-    </div>}
-  </div>
-}
-
-export function EffortControl({ settings, changeSettings, busy, menu, setMenu }) {
-  const trigger = useRef(null)
-  const selected = getEffortLevel(settings.effort)
-  const expanded = menu === 'effort'
-
-  function select(id) {
-    changeSettings({ effort: id })
-    setMenu('')
-    trigger.current?.focus()
-  }
-
-  return <div data-menu onKeyDown={event => { if (expanded && event.key === 'Escape') trigger.current?.focus() }}>
-    <button ref={trigger} className="model-button" type="button" aria-label={`Niveau de réflexion : ${selected.label}`}
-      aria-expanded={expanded} aria-controls={expanded ? 'effort-options' : undefined}
-      onClick={() => setMenu(expanded ? '' : 'effort')} disabled={busy}>
-      {selected.label} <ChevronDown size={16} />
-    </button>
-    {expanded && <div className="popover effort-menu" id="effort-options" role="group" aria-label="Niveau de réflexion">
-      {effortLevels.map(level => <button key={level.id} type="button" className="menu-row effort-option"
-        aria-pressed={selected.id === level.id} onClick={() => select(level.id)}>
-        {selected.id === level.id && <Check size={22} aria-hidden="true" />}
-        <span className="effort-option-label">{level.label}<small>{level.description}</small></span>
+      <div className="menu-heading">Réflexion</div>
+      {effortLevels.map(level => <button key={level.id} type="button" className="menu-row"
+        aria-pressed={settings.effort === level.id} onClick={() => { changeSettings({ effort: level.id }); setMenu('') }}>
+        <span className="model-option">{level.label}<small>{level.description}</small></span>
+        {settings.effort === level.id && <Check className="menu-check" size={16} />}
       </button>)}
+      <div className="menu-divider" />
+      <button type="button" className="menu-row" onClick={openSettings}><Settings2 size={17} /> Paramètres</button>
     </div>}
   </div>
 }

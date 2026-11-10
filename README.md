@@ -56,7 +56,7 @@ L’adresse préremplie dans Ocean est `http://pop-os-comfyui.tail917fd3.ts.net:
 ## Utiliser les outils
 
 - **Apprentissage guidé** se trouve dans le menu **+**. Il demande au modèle de donner un indice à la fois et d’attendre la tentative de l’élève. Le respect de cette consigne dépend du modèle chargé.
-- **Réflexion** se règle à côté du bouton d’envoi. Choisis **Bas**, **Moyen** ou **Élevé**. **Élevé** est le réglage par défaut et correspond à `xhigh` côté API.
+- **Réflexion** se trouve dans le menu du modèle. Choisis **Bas**, **Moyen** ou **Élevé**. **Élevé** est le réglage par défaut et correspond à `xhigh` côté API.
 - **Python** s’exécute dans un worker isolé du navigateur. Le moteur Pyodide est téléchargé depuis jsDelivr au besoin. **Recherche web** utilise la clé Brave si elle est configurée. Le modèle choisit d’appeler les outils via son template de function calling.
 - **OneNote**. Colle dans le champ du chat. Quand le navigateur reçoit une image avec le texte ou le HTML de la sélection, Ocean joint uniquement l’image. Si OneNote fournit exclusivement du texte au navigateur, utilise une capture Windows (`Win+Maj+S`) et colle-la.
 - **Fichiers**. Utilise **+ → Ajouter des fichiers** ou dépose les fichiers sur le champ de saisie. Ocean lit le texte des PDF et des DOCX, les cellules des XLSX et les fichiers texte courants (TXT, Markdown, CSV, JSON ou code). Les pages de PDF scannées sans texte sont envoyées comme images et nécessitent un modèle compatible vision.

@@ -151,13 +151,9 @@ button { -webkit-tap-highlight-color: transparent; }
   min-width: 218px; position: absolute; z-index: 6; padding: 6px; border: 1px solid var(--divider);
   border-radius: 16px; background: var(--panel); box-shadow: 0 9px 30px #0004;
 }
-.tools-menu, .model-menu, .effort-menu { bottom: calc(100% + 11px); }
+.tools-menu, .model-menu { bottom: calc(100% + 11px); }
 .tools-menu { left: 0; }
 .model-menu { right: 0; min-width: 250px; max-height: 65dvh; overflow: auto; }
-.effort-menu {
-  right: 0; width: min(295px, calc(100vw - 54px)); min-width: 0; max-height: 65dvh; overflow: auto;
-  padding: 12px; border: 0; border-radius: 30px; background: light-dark(#fff, #1f1f1f);
-}
 .account-menu { bottom: calc(100% + 7px); left: 0; width: 235px; }
 .chat-menu { top: calc(100% + 5px); right: 0; min-width: 170px; }
 .chat-menu-control { position: relative; }
@@ -166,13 +162,6 @@ button { -webkit-tap-highlight-color: transparent; }
   text-align: left; border: 0; border-radius: 10px; background: transparent; font-size: 13px;
 }
 .menu-row:hover { background: var(--hover); }
-.effort-option {
-  display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 0 16px;
-  min-height: 77px; padding: 10px 14px 10px 16px; border-radius: 18px;
-}
-.effort-option > svg { grid-area: 1 / 1; }
-.effort-option-label { grid-area: 1 / 2; display: grid; gap: 3px; font-size: 20px; line-height: 1.15; }
-.effort-option-label small { color: var(--muted); font-size: inherit; }
 .menu-check { margin-left: auto; color: var(--blue); }
 .menu-heading { padding: 8px 10px 3px; font-size: 11px; color: var(--muted); font-weight: 600; }
 .menu-divider { height: 1px; margin: 4px; background: var(--divider); }
@@ -326,7 +315,7 @@ details[open] summary svg { transform: rotate(180deg); }
   .answer-actions, .user-message-actions, .generation-status { animation: reveal .18s ease-out both; }
   .draft-attachments > *, .popover, .modal[open] { animation: float-in .17s ease-out both; }
   .tools-menu, .account-menu { transform-origin: bottom left; }
-  .composer-model .model-menu, .effort-menu { transform-origin: bottom right; }
+  .composer-model .model-menu { transform-origin: bottom right; }
   .header-model .model-menu, .chat-menu { transform-origin: top left; }
   .modal::backdrop { animation: reveal .17s ease-out both; }
   .icon-button, .nav-button, .history-button, .menu-row, .model-button, .theme-options button {
