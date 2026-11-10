@@ -21,7 +21,7 @@ function pythonWorker() {
     return files
   }
 
-  self.onmessage = async ({ data: { code, stdin } }) => {
+  self.onmessage = async ({ data: { code, stdin, files } }) => {
     let output = ''
     const append = value => {
       if (output.length < 12000) output += value.slice(0, 12000 - output.length) + '\n'
@@ -35,6 +35,12 @@ function pythonWorker() {
       python.setStdin({ stdin: () => lines.shift() ?? null })
       python.FS.mkdirTree(folder)
       python.FS.chdir(folder)
+      if (files.length) {
+        python.FS.mkdirTree(`${folder}/attachments`)
+        for (const { name, blob } of files) {
+          python.FS.writeFile(`${folder}/attachments/${name}`, new Uint8Array(await blob.arrayBuffer()))
+        }
+      }
       python.runPython('import os; os.environ["MPLBACKEND"] = "Agg"')
       await python.loadPackagesFromImports(code)
       const result = await python.runPythonAsync(code)
@@ -101,7 +107,7 @@ window.addEventListener('message', event => {
       port.postMessage({ error: 'Impossible de démarrer le moteur de code.' })
       worker.terminate()
     }
-    worker.postMessage({ code: event.data.code, stdin: event.data.stdin || '' })
+    worker.postMessage({ code: event.data.code, stdin: event.data.stdin || '', files: event.data.files || [] })
   } catch {
     port.postMessage({ error: 'Le navigateur a bloqué le moteur de code.' })
   } finally {

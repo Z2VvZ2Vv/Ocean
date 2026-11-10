@@ -1,4 +1,4 @@
-import { getDocument, GlobalWorkerOptions, OPS } from 'pdfjs-dist'
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 GlobalWorkerOptions.workerSrc = workerUrl
@@ -20,12 +20,6 @@ class PdfAssets {
   }
 }
 
-const imageOperations = new Set([
-  OPS.paintImageXObject, OPS.paintImageXObjectRepeat, OPS.paintInlineImageXObject,
-  OPS.paintInlineImageXObjectGroup, OPS.paintImageMaskXObject, OPS.paintImageMaskXObjectGroup,
-  OPS.paintImageMaskXObjectRepeat,
-])
-
 async function renderPage(page) {
   const original = page.getViewport({ scale: 1 })
   const viewport = page.getViewport({ scale: 1600 / Math.max(original.width, original.height) })
@@ -40,50 +34,66 @@ async function renderPage(page) {
   }
 }
 
-export async function readPdf(file, imageLimit, textLimit, signal) {
+async function openPdf(file, signal, inspect) {
+  signal.throwIfAborted()
+  const data = await file.arrayBuffer()
+  signal.throwIfAborted()
   const task = getDocument({
-    data: await file.arrayBuffer(),
+    data,
     useWorkerFetch: false,
     BinaryDataFactory: PdfAssets,
     stopAtErrors: true,
     maxImageSize: 32_000_000,
   })
+  let cleanup
+  const destroy = () => { cleanup ??= task.destroy().catch(() => {}) }
+  signal.addEventListener('abort', destroy, { once: true })
   try {
     const pdf = await task.promise
-    if (pdf.numPages > 100) throw new Error('Le PDF dépasse 100 pages. Exporte les pages utiles dans un fichier plus court.')
-    const parts = []
-    const pageImages = []
-    let length = 0
-    for (let number = 1; number <= pdf.numPages; number++) {
+    signal.throwIfAborted()
+    return await inspect(pdf)
+  } catch (error) {
+    signal.throwIfAborted()
+    if (error.name === 'PasswordException') throw new Error('Ce PDF est protégé par un mot de passe.')
+    if (error.name === 'InvalidPDFException') throw new Error('Ce PDF est illisible ou endommagé.')
+    throw error
+  } finally {
+    signal.removeEventListener('abort', destroy)
+    destroy()
+    await cleanup
+  }
+}
+
+export function readPdfPages(file, start, count, offset, signal) {
+  return openPdf(file, signal, async pdf => {
+    if (start > pdf.numPages) throw new Error(`Ce PDF contient ${pdf.numPages} pages.`)
+    const end = Math.min(pdf.numPages, start + count - 1)
+    const limit = Math.floor(12000 / (end - start + 1))
+    const pages = []
+    for (let number = start; number <= end; number++) {
       signal.throwIfAborted()
       const page = await pdf.getPage(number)
       try {
         const { items } = await page.getTextContent()
         const text = items.map(item => typeof item.str === 'string'
           ? item.str + (item.hasEOL ? '\n' : ' ') : '').join('').trim()
-        if (text) {
-          const part = `Page ${number}\n${text}`
-          length += part.length + 2
-          if (length > textLimit) throw new Error('Les pièces jointes contiennent trop de texte. Essaie avec un extrait.')
-          parts.push(part)
-        } else {
-          const { fnArray } = await page.getOperatorList()
-          if (!fnArray.some(operation => imageOperations.has(operation))) continue
-          if (pageImages.length >= imageLimit) {
-            throw new Error('Trop de pages scannées ou d’images pour ce message. Joins moins de pages à la fois.')
-          }
-          pageImages.push({ number, url: await renderPage(page) })
-        }
-      } finally {
-        page.cleanup()
-      }
+        const from = number === start ? offset : 0
+        pages.push({
+          page: number, text: text.slice(from, from + limit),
+          ...(text.length > from + limit && { next_offset: from + limit }),
+          ...(!text && { note: 'Aucun texte sélectionnable. Utilise view_attachment pour examiner cette page.' }),
+        })
+      } finally { page.cleanup() }
     }
-    return { text: parts.join('\n\n'), pageCount: pdf.numPages, pageImages }
-  } catch (error) {
-    if (error.name === 'PasswordException') throw new Error('Ce PDF est protégé par un mot de passe.')
-    if (error.name === 'InvalidPDFException') throw new Error('Ce PDF est illisible ou endommagé.')
-    throw error
-  } finally {
-    await task.destroy()
-  }
+    return { page_count: pdf.numPages, pages, ...(end < pdf.numPages && { next_page: end + 1 }) }
+  })
+}
+
+export function viewPdfPage(file, number, signal) {
+  return openPdf(file, signal, async pdf => {
+    if (number > pdf.numPages) throw new Error(`Ce PDF contient ${pdf.numPages} pages.`)
+    const page = await pdf.getPage(number)
+    try { return await renderPage(page) }
+    finally { page.cleanup() }
+  })
 }

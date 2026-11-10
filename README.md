@@ -59,12 +59,12 @@ L’adresse préremplie dans Ocean est `http://pop-os-comfyui.tail917fd3.ts.net:
 - **Apprentissage guidé** se trouve dans le menu **+**. Il demande au modèle de donner un indice à la fois et d’attendre la tentative de l’élève. Le respect de cette consigne dépend du modèle chargé.
 - **Réflexion** se trouve dans le menu du modèle. Choisis **Bas**, **Moyen** ou **Élevé**. **Élevé** est le réglage par défaut et correspond à `xhigh` côté API.
 - **Python** s’exécute dans un worker isolé du navigateur. Le moteur Pyodide est téléchargé depuis jsDelivr au besoin. **Recherche web** utilise la clé Brave si elle est configurée. Le modèle choisit d’appeler les outils via son template de function calling.
-- **Schémas et code**. Ocean affiche les blocs Mermaid comme des schémas ou des graphiques. Les blocs de code identifiés par leur langage sont colorés et copiables. Le bouton **Exécuter** affiche la sortie ou les erreurs sous le programme. Python et JavaScript de base fonctionnent dans le navigateur.
+- **Schémas et code**. Ocean affiche les blocs Mermaid comme des schémas ou des graphiques. Les blocs de code identifiés par leur langage sont colorés et copiables. Clique sur **Modifier** pour tester ta version d’un programme avec **Exécuter**. L’icône de réinitialisation rétablit le code de la réponse. Python et JavaScript de base fonctionnent dans le navigateur.
 - **OneNote**. Colle dans le champ du chat. Quand le navigateur reçoit une image avec le texte ou le HTML de la sélection, Ocean joint uniquement l’image. Si OneNote fournit exclusivement du texte au navigateur, utilise une capture Windows (`Win+Maj+S`) et colle-la.
-- **Fichiers**. Utilise **+ → Ajouter des fichiers** ou dépose les fichiers sur le champ de saisie. Ocean lit le texte des PDF et des DOCX, les cellules des XLSX et les fichiers texte courants (TXT, Markdown, CSV, JSON ou code). Les pages de PDF scannées sans texte sont envoyées comme images et nécessitent un modèle compatible vision.
+- **Fichiers**. Utilise **+ → Ajouter des fichiers** ou dépose-les sur le champ de saisie. Tu peux joindre des PDF, des images, des ZIP et d’autres formats sans limite de nombre imposée par Ocean. Le navigateur conserve les fichiers dans l’historique selon l’espace de stockage disponible.
 - **Apparence**. Choisis **Clair**, **Sombre** ou **Système** dans les paramètres. Ocean mémorise le choix dans le navigateur.
 
-Par message, tu peux joindre jusqu’à 4 documents de 12 Mo chacun, avec 45 000 caractères extraits au total. Les PDF sont limités à 100 pages et les pages scannées comptent dans la limite de 4 images par message.
+Le modèle lit les fichiers à la demande. Il peut parcourir le texte des PDF par pages, afficher une page en image pour examiner un scan ou un schéma, et lister puis ouvrir les entrées d’un ZIP. L’examen visuel exige un modèle compatible vision. Les fichiers des anciennes discussions étaient enregistrés sous forme d’extraits. Joins de nouveau un PDF ancien pour examiner une autre page.
 
 `npm test` vérifie le protocole d’inférence avec un serveur simulé. `npm run build` compile la version de production.
 
@@ -75,4 +75,6 @@ Sur Vercel, ajoute `OCEAN_CODE_SANDBOX=1` à l’environnement **Production** et
 La sandbox exécute JavaScript (Node.js), TypeScript, Bash, C, C++, C#, Java, Go, Rust, Ruby et PHP. Python bascule vers la sandbox si un module manque dans le navigateur ou si tu renseignes **Paquets PyPI à installer** dans le bloc. Indique les noms des paquets ou des versions exactes comme `numpy==2.2.6`. Ocean installe les distributions binaires disponibles sur PyPI avant d’exécuter le programme. Le code exécuté dans la sandbox est envoyé à Vercel. Ton navigateur contacte directement le modèle IA via Tailscale.
 
 Dans le navigateur, Python peut afficher les graphiques Matplotlib et les fichiers PNG, JPEG, WebP, CSV, TXT et JSON créés dans son dossier de travail. Dans la sandbox, enregistre les fichiers à récupérer dans `artifacts/`. Ocean affiche les images dans le chat et propose de télécharger les fichiers. Chaque exécution rapporte jusqu’à trois fichiers de 750 ko chacun. Le plan Hobby inclut un quota de sandbox. [Quotas Vercel Sandbox](https://vercel.com/docs/sandbox/pricing)
+
+L’outil Python peut ouvrir des pièces jointes sélectionnées dans `attachments/`, y compris un fichier extrait d’un ZIP. Traite les gros lots en plusieurs exécutions. Le navigateur monte jusqu’à 32 Mio par exécution et la sandbox Vercel jusqu’à 2,5 Mo par requête. Seuls les fichiers sélectionnés pour une exécution cloud sont envoyés à Vercel.
 

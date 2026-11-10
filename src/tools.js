@@ -1,4 +1,5 @@
 import { runCode, runnableLanguages } from './code.js'
+import { fileTools } from './file-tools.js'
 
 async function searchWeb({ query }, signal) {
   if (typeof query !== 'string' || !query.trim() || query.length > 400) throw new Error('Requête web invalide.')
@@ -10,25 +11,32 @@ async function searchWeb({ query }, signal) {
   return data
 }
 
-export function chatTools(searchEnabled, sandboxEnabled) {
+export function chatTools(searchEnabled, sandboxEnabled, messages = []) {
+  const attachments = fileTools(messages)
   const tools = [{
     label: 'Exécution de Python',
     definition: {
       type: 'function',
       function: {
         name: 'python',
-        description: sandboxEnabled
+        description: (sandboxEnabled
           ? 'Exécute du Python 3 isolé. Pour des bibliothèques PyPI hors du navigateur, renseigne packages avec leurs noms de distribution et enregistre les fichiers dans artifacts/. Sinon, utilise Matplotlib ou écris les fichiers dans le dossier courant. Utilise print pour les résultats texte.'
-          : 'Exécute du Python 3 isolé dans le navigateur. Utilise print pour les résultats texte. Pour produire un graphique ou un fichier, utilise Matplotlib ou écris un PNG, CSV, TXT ou JSON dans le dossier courant.',
+          : 'Exécute du Python 3 isolé dans le navigateur. Utilise print pour les résultats texte. Pour produire un graphique ou un fichier, utilise Matplotlib ou écris un PNG, CSV, TXT ou JSON dans le dossier courant.')
+          + (attachments.hasFiles ? ' Sélectionne les pièces jointes dans files pour les monter dans attachments/. Utilise os.listdir("attachments") pour obtenir leurs noms. Python peut traiter une archive avec zipfile.' : ''),
         parameters: {
           type: 'object', properties: {
             code: { type: 'string' }, stdin: { type: 'string' },
             ...(sandboxEnabled && { packages: { type: 'array', items: { type: 'string' }, maxItems: 8 } }),
+            ...(attachments.hasFiles && { files: { type: 'array', maxItems: 32, items: {
+              type: 'object', properties: attachments.selectors, required: ['file_id'], additionalProperties: false,
+            } } }),
           }, required: ['code'], additionalProperties: false,
         },
       },
     },
-    run: (args, signal) => runCode({ ...args, language: 'python' }, sandboxEnabled, signal),
+    run: async ({ files = [], ...args }, signal) => runCode({
+      ...args, language: 'python', files: await attachments.mount(files, signal),
+    }, sandboxEnabled, signal),
   }, {
     label: 'Exécution du code',
     definition: {
@@ -60,5 +68,5 @@ export function chatTools(searchEnabled, sandboxEnabled) {
     },
     run: searchWeb,
   })
-  return tools
+  return [...tools, ...attachments.tools]
 }

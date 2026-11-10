@@ -48,7 +48,7 @@ function Answer({ message, generating, progress, onRate, onRegenerate, menu, set
     finally { setMenu('') }
   }
 
-  return <article className="answer">
+  return <article className="answer" data-learning={message.learning || undefined}>
     <div className="answer-mark"><img src="/ocean.svg" alt="Ocean" /></div>
     <div className="answer-body">
       {generating && <div className="generation-status" role="status"><LoaderCircle className="spinner" size={16} /> {progress}</div>}
@@ -257,7 +257,7 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
     const controller = new AbortController()
     request.current = controller
     follow.current = true
-    const blank = { id: crypto.randomUUID(), role: 'assistant', text: '', reasoning: '' }
+    const blank = { id: crypto.randomUUID(), role: 'assistant', text: '', reasoning: '', learning: Boolean(chat.learning) }
     let latest = blank
     setLive(blank)
     setProgress('Ocean réfléchit…')
@@ -266,7 +266,7 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
     try {
       const response = await runChat({
         config: settings, messages: chat.messages, learning: chat.learning,
-        tools: chatTools(searchEnabled, sandboxEnabled), signal: controller.signal,
+        tools: chatTools(searchEnabled, sandboxEnabled, chat.messages), signal: controller.signal,
         onUpdate: update => {
           latest = { ...blank, ...update, reasoning: chat.learning ? '' : update.reasoning }
           setLive(latest)

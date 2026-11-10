@@ -124,3 +124,30 @@ test('la réflexion utilise uniquement low, medium et xhigh dès la première re
 
   assert.deepEqual(efforts, ['xhigh', 'low', 'medium', 'xhigh', 'xhigh', 'low'])
 })
+
+test('une page de PDF devient une image vision après la réponse texte de l’outil', async ({ mock }) => {
+  const image = 'data:image/jpeg;base64,cGFnZQ=='
+  const requests = []
+  mock.method(globalThis, 'fetch', async (_url, options) => {
+    requests.push(JSON.parse(options.body))
+    if (requests.length === 1) return stream({ delta: { tool_calls: [{ id: 'page', function: { name: 'view_attachment', arguments: '{}' } }] }, finish_reason: 'tool_calls' })
+    return stream({ delta: { content: 'La page montre un graphique.' }, finish_reason: 'stop' })
+  })
+
+  await runChat({ config: defaultSettings, messages: [{ role: 'user', text: 'Observe la page 3.', documents: [
+    { id: 'pdf', name: 'cours.pdf', format: 'PDF', blob: new Blob(['PDF local uniquement']) },
+  ] }], signal: new AbortController().signal, onTool: () => {}, onUpdate: () => {}, tools: [{
+    definition: { type: 'function', function: { name: 'view_attachment' } },
+    run: async () => ({ image: 'cours.pdf — page 3', images: [{ label: 'cours.pdf — page 3', url: image }] }),
+  }] })
+
+  assert.match(requests[0].messages[1].content, /cours\.pdf/)
+  assert.ok(!JSON.stringify(requests[0]).includes('PDF local uniquement'))
+  assert.deepEqual(requests[1].messages.slice(-2), [
+    { role: 'tool', tool_call_id: 'page', content: '{"image":"cours.pdf — page 3"}' },
+    { role: 'user', content: [
+      { type: 'text', text: 'Observation d’une pièce jointe : cours.pdf — page 3' },
+      { type: 'image_url', image_url: { url: image } },
+    ] },
+  ])
+})

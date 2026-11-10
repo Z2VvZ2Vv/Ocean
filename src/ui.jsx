@@ -3,8 +3,8 @@ import {
   ArrowUp, BookOpen, Check, ChevronDown, CircleHelp, FileText, LoaderCircle,
   LogOut, Monitor, Moon, Network, PanelLeft, Paperclip, Plus, Search, Settings2, Square, SquarePen, Sun, Trash2, X,
 } from 'lucide-react'
-import { maxImages, pastedImages } from './clipboard.js'
-import { attachmentTypes, imageSlots, readAttachments } from './attachments.js'
+import { pastedImages } from './clipboard.js'
+import { readAttachments } from './attachments.js'
 import { apiBase, effortLevels, listModels, modelName } from './inference.js'
 
 export function Brand() {
@@ -102,12 +102,11 @@ export function Composer({
 
   function paste(event) {
     if (reading) { event.preventDefault(); return }
-    const pending = pastedImages(event.clipboardData, imageSlots(attachments))
+    const pending = pastedImages(event.clipboardData)
     if (!pending) return
     event.preventDefault()
     void attach(async current => {
       const added = await pending
-      if (!added.length) throw new Error(`Jusqu’à ${maxImages} images ou pages scannées par message.`)
       return { ...current, images: [...current.images, ...added] }
     })
   }
@@ -125,7 +124,7 @@ export function Composer({
       event.preventDefault()
       attachFiles([...event.dataTransfer.files])
     }}>
-    <input ref={fileInput} type="file" aria-label="Ajouter des fichiers" accept={attachmentTypes} multiple hidden
+    <input ref={fileInput} type="file" aria-label="Ajouter des fichiers" multiple hidden
       onChange={event => {
         const files = [...event.target.files]
         event.target.value = ''

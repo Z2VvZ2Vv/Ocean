@@ -73,16 +73,20 @@ async function collectArtifacts(sandbox, language, signal) {
   return files
 }
 
-export async function runSandboxCode({ language, code, stdin, packages = [] }, signal, createSandbox = options => Sandbox.create(options)) {
+export async function runSandboxCode({ language, code, stdin, packages = [], files = [] }, signal, {
+  createSandbox = options => Sandbox.create(options), onProgress = () => {},
+} = {}) {
   const program = programs[language]
   const target = codeLanguage(language)
   if (!program || !target) throw new Error('Langage indisponible dans la sandbox.')
   const networkPolicy = packages.length ? { allow: ['pypi.org', 'files.pythonhosted.org'] } : program.package ? 'allow-all' : 'deny-all'
+  onProgress('opening')
   const sandbox = await createSandbox({
     persistent: false, timeout: 100000, resources: { vcpus: 1 },
     networkPolicy, signal,
   })
   try {
+    if (program.package || packages.length) onProgress('setup')
     if (program.package) {
       const command = (program.build || program.run)[0]
       const setup = await sandbox.runCommand({
@@ -106,17 +110,26 @@ export async function runSandboxCode({ language, code, stdin, packages = [] }, s
 
     const javaClass = language === 'java' && code.match(/\bpublic\s+(?:(?:final|abstract)\s+)?class\s+([A-Za-z_$][\w$]*)/)
     const file = javaClass ? `${javaClass[1]}.java` : language === 'javascript' ? 'main.mjs' : target.file
-    await sandbox.runCommand({ cmd: 'mkdir', args: ['-p', 'artifacts'], timeoutMs: 2000, signal })
-    await sandbox.writeFiles([{ path: file, content: code }, { path: '.ocean-stdin', content: stdin }], { signal })
+    await sandbox.runCommand({ cmd: 'mkdir', args: ['-p', 'artifacts', ...(files.length ? ['attachments'] : [])], timeoutMs: 2000, signal })
+    await sandbox.writeFiles([{ path: file, content: code }, { path: '.ocean-stdin', content: stdin }, ...files], { signal })
 
-    const build = program.build && await stage(sandbox, program.build, '/dev/null', '.ocean-compile', { timeoutMs: 20000, fileLimit: 16384, signal })
-    if (build && build.exitCode !== 0) return { output: build.output, error: 'Échec de la compilation.' }
+    let build
+    if (program.build) {
+      onProgress('compiling')
+      build = await stage(sandbox, program.build, '/dev/null', '.ocean-compile', { timeoutMs: 20000, fileLimit: 16384, signal })
+      if (build.exitCode !== 0) return { output: build.output, error: 'Échec ou délai dépassé pendant la compilation.' }
+    }
 
     const command = javaClass ? ['java', file] : program.run
-    const run = await stage(sandbox, command, '.ocean-stdin', '.ocean-output', { timeoutMs: 8000, fileLimit: 2048, signal })
+    onProgress('running')
+    const run = await stage(sandbox, ['timeout', '--kill-after=1s', '8s', ...command], '.ocean-stdin', '.ocean-output', { timeoutMs: 10000, fileLimit: 2048, signal })
+    onProgress('reading')
     const artifacts = await collectArtifacts(sandbox, language, signal)
     const output = [build?.output, run.output].filter(Boolean).join('\n').slice(0, 12000)
-    return { output, artifacts, ...(run.exitCode !== 0 && { error: `Le programme s’est arrêté (code ${run.exitCode}).` }) }
+    const error = run.exitCode === 124 ? 'Le programme a dépassé la limite de 8 secondes.'
+      : run.exitCode === null || run.exitCode === 137 ? 'L’exécution a été interrompue.'
+      : run.exitCode !== 0 ? `Le programme s’est arrêté (code ${run.exitCode}).` : ''
+    return { output, artifacts, ...(error && { error }) }
   } finally {
     await sandbox.delete({ signal: AbortSignal.timeout(5000) }).catch(() => {})
   }

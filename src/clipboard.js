@@ -1,7 +1,8 @@
-export const maxImages = 4
 const maxBytes = 8 * 1024 * 1024
 const allowed = /^image\/(png|jpeg|webp|gif)$/i
 const inlineImage = /^data:image\/(png|jpeg|webp|gif);base64,[a-z0-9+/]+=*$/i
+
+export const canInlineImage = file => allowed.test(file.type) && file.size <= maxBytes
 
 function fileUrl(file) {
   return new Promise((resolve, reject) => {
@@ -20,13 +21,13 @@ export async function readImages(files) {
   }))
 }
 
-export function pastedImages(clipboard, limit) {
+export function pastedImages(clipboard) {
   if (!clipboard) return null
   const items = [...(clipboard.items || [])].filter(item => item.kind === 'file' && item.type.startsWith('image/'))
   const files = items.map(item => item.getAsFile()).filter(Boolean)
-  if (files.length) return readImages(files.slice(0, limit))
+  if (files.length) return readImages(files)
   const fallback = [...(clipboard.files || [])].filter(file => file.type.startsWith('image/'))
-  if (fallback.length) return readImages(fallback.slice(0, limit))
+  if (fallback.length) return readImages(fallback)
   const html = clipboard.getData('text/html')
   if (html && html.length < maxBytes * 6) {
     const template = document.createElement('template')
@@ -34,7 +35,7 @@ export function pastedImages(clipboard, limit) {
     const imageTags = template.content.querySelectorAll('img[src]')
     const urls = [...new Set([...imageTags].map(img => img.getAttribute('src')))]
       .filter(url => url.length <= Math.ceil(maxBytes / 3) * 4 + 30 && inlineImage.test(url))
-    if (urls.length) return Promise.resolve(urls.slice(0, limit).map(url => ({ id: crypto.randomUUID(), url, name: 'Capture d’écran' })))
+    if (urls.length) return Promise.resolve(urls.map(url => ({ id: crypto.randomUUID(), url, name: 'Capture d’écran' })))
     if (imageTags.length) return Promise.reject(new Error('Le navigateur n’a pas reçu les pixels de l’image. Fais une capture avec Win+Maj+S, puis colle-la.'))
   }
   if (items.length) return Promise.reject(new Error('Le presse-papiers annonce une image, mais le navigateur ne fournit pas ses données.'))

@@ -187,13 +187,21 @@ button { -webkit-tap-highlight-color: transparent; }
 .answer-mark { flex: 0 0 24px; padding-top: 1px; }
 .answer-mark img { width: 24px; height: 24px; }
 .answer-body { flex: 1; min-width: 0; }
-.markdown { overflow-wrap: anywhere; }
+.markdown { overflow-wrap: anywhere; --math-gap: .85em; --math-line-height: 1.68; --math-step-gap: .35em; }
+.answer[data-learning] .markdown { --math-gap: 1.12em; --math-line-height: 1.8; --math-step-gap: .65em; }
 .markdown > *:first-child { margin-top: 0; }
 .markdown p { margin: 0 0 .9em; }
 .markdown h1, .markdown h2, .markdown h3 { font-size: 1.22em; line-height: 1.35; margin: .9em 0 .5em; }
 .markdown ol, .markdown ul { margin: .5em 0 1em; padding-left: 1.5em; }
 .markdown pre, .markdown blockquote { background: var(--bubble); border-radius: 12px; margin: 12px 0; padding: 12px 16px; }
-.markdown pre, .markdown .katex-display { overflow-x: auto; }
+.markdown pre { overflow-x: auto; }
+.markdown :is(p, li):has(.katex) { line-height: var(--math-line-height); }
+.markdown :is(ol, ul):has(.katex) > li + li { margin-block-start: var(--math-step-gap); }
+.markdown .katex-display {
+  margin-block: var(--math-gap); max-width: 100%; padding: .15em .1em .25em;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+}
+.markdown .katex-display > .katex { min-width: max-content; text-align: start; }
 .markdown code { font-size: .91em; }
 .markdown :not(pre) > code { background: var(--bubble); border-radius: 4px; padding: 1px 4px; }
 .code-block, .diagram {
@@ -201,7 +209,8 @@ button { -webkit-tap-highlight-color: transparent; }
   overflow: hidden; background: var(--bubble);
 }
 .code-bar, .code-actions { display: flex; align-items: center; gap: 6px; }
-.code-bar { justify-content: space-between; padding: 6px 9px 6px 14px; border-bottom: 1px solid var(--divider); }
+.code-bar { justify-content: space-between; flex-wrap: wrap; padding: 6px 9px 6px 14px; border-bottom: 1px solid var(--divider); }
+.code-actions { flex-wrap: wrap; }
 .code-label { color: var(--muted); font-size: 12px; font-weight: 550; }
 .code-actions button {
   display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 12px;
@@ -211,13 +220,22 @@ button { -webkit-tap-highlight-color: transparent; }
 .code-actions button:disabled { opacity: .55; }
 .markdown .code-block > pre, .markdown .code-result > pre { margin: 0; border-radius: 0; }
 .code-block code { font-family: ui-monospace, Consolas, monospace; line-height: 1.55; }
+.code-editor {
+  display: block; width: 100%; min-width: 0; padding: 12px 16px; resize: vertical; border: 0;
+  background: var(--panel); font: .91em/1.55 ui-monospace, Consolas, monospace; white-space: pre; tab-size: 4;
+}
+.code-editor:focus-visible { outline-offset: -2px; }
+.markdown .code-limit { padding: 0 14px; margin: 6px 0; }
 .code-input, .code-result { border-top: 1px solid var(--divider); padding: 8px 14px; }
-.code-input summary, .diagram summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+.diagram summary { font-size: 12px; color: var(--muted); cursor: pointer; }
 .code-input label { display: grid; gap: 4px; margin-top: 8px; font-size: 12px; }
+.code-input label:first-child { margin-top: 0; }
 .code-input textarea, .code-input input {
   width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
 }
 .code-input textarea { resize: vertical; }
+.code-input-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.code-input-actions button { min-height: 32px; padding: 6px 11px; font-size: 12px; }
 .markdown .code-result > pre { padding: 5px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .markdown .code-result > p { margin: 0; }
 .code-block .hljs-keyword, .code-block .hljs-selector-tag, .code-block .hljs-meta { color: light-dark(#7932a6, #d5a4fa); }
