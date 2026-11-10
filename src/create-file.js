@@ -49,16 +49,17 @@ async function spreadsheet(rows, header) {
 }
 
 async function wordDocument(content) {
-  const [docx, { unified }, { default: remarkParse }, { default: remarkGfm }] = await Promise.all([
-    import('docx'), import('unified'), import('remark-parse'), import('remark-gfm'),
+  const [docx, { unified }, { default: remarkParse }, { default: remarkGfm }, { default: remarkMath }] = await Promise.all([
+    import('docx'), import('unified'), import('remark-parse'), import('remark-gfm'), import('remark-math'),
   ])
   const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, HeadingLevel, WidthType } = docx
-  const tree = unified().use(remarkParse).use(remarkGfm).parse(content)
+  const tree = unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(content)
 
   function inline(node, style = {}) {
     switch (node.type) {
       case 'text': return [new TextRun({ ...style, text: node.value.replace(/\n/g, ' ') })]
-      case 'inlineCode': return [new TextRun({ ...style, text: node.value, font: 'Consolas' })]
+      case 'inlineCode': return [new TextRun({ ...style, text: node.value, style: 'OceanCode' })]
+      case 'inlineMath': return [new TextRun({ ...style, text: content.slice(node.position.start.offset, node.position.end.offset) })]
       case 'strong': return node.children.flatMap(child => inline(child, { ...style, bold: true }))
       case 'emphasis': return node.children.flatMap(child => inline(child, { ...style, italics: true }))
       case 'delete': return node.children.flatMap(child => inline(child, { ...style, strike: true }))
@@ -83,7 +84,8 @@ async function wordDocument(content) {
         prefix: part === 0 ? (node.ordered ? `${(node.start ?? 1) + index}. ` : '• ') : '',
       })))
       case 'blockquote': return node.children.flatMap(child => block(child, { depth: (options.depth || 0) + 1, quoted: true }))
-      case 'code': return node.value.split('\n').map(text => new Paragraph({ children: [new TextRun({ text, font: 'Consolas' })] }))
+      case 'code': return node.value.split('\n').map(text => new Paragraph({ style: 'OceanCodeBlock', children: [new TextRun({ text, font: 'Consolas' })] }))
+      case 'math': return [new Paragraph({ children: [new TextRun(`$$${node.value}$$`)] })]
       case 'table': return [new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
         rows: node.children.map((row, index) => new TableRow({
@@ -101,6 +103,10 @@ async function wordDocument(content) {
   const children = tree.children.flatMap(node => block(node))
   if (!children.length) throw new Error('Le document doit contenir au moins un titre, un paragraphe, une liste ou un tableau.')
   return Packer.toBlob(new Document({
+    styles: {
+      characterStyles: [{ id: 'OceanCode', name: 'Ocean Code', basedOn: 'DefaultParagraphFont', run: { font: 'Consolas' } }],
+      paragraphStyles: [{ id: 'OceanCodeBlock', name: 'Ocean Code Block', basedOn: 'Normal', run: { font: 'Consolas' } }],
+    },
     sections: [{ properties: { page: { size: { width: 11906, height: 16838 } } }, children }],
   }))
 }

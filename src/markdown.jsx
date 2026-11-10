@@ -1,4 +1,4 @@
-import { createContext, lazy, Suspense, useContext } from 'react'
+import { Children, createContext, createElement, lazy, memo, Suspense, useContext } from 'react'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
@@ -9,6 +9,17 @@ const CodeBlock = lazy(() => import('./code-block.jsx'))
 const Diagram = lazy(() => import('./diagram.jsx'))
 
 const Rendering = createContext({})
+
+function FlowText({ tag, children, ...props }) {
+  const { generating } = useContext(Rendering)
+  const content = generating ? Children.map(children, (child, index) => {
+    if (typeof child !== 'string') return child
+    return (child.match(/(?:\S+\s*){1,3}|\s+/gu) || []).map((words, position) => (
+      <span className="stream-fragment" key={`${index}-${position}`}>{words}</span>
+    ))
+  }) : children
+  return createElement(tag, props, content)
+}
 
 function Fence({ node, children }) {
   const { generating, sandboxEnabled, theme } = useContext(Rendering)
@@ -25,14 +36,21 @@ function Fence({ node, children }) {
 
 const components = {
   pre: Fence,
+  p: ({ node, ...props }) => <FlowText tag="p" {...props} />,
+  li: ({ node, ...props }) => <FlowText tag="li" {...props} />,
+  h1: ({ node, ...props }) => <FlowText tag="h1" {...props} />,
+  h2: ({ node, ...props }) => <FlowText tag="h2" {...props} />,
+  h3: ({ node, ...props }) => <FlowText tag="h3" {...props} />,
+  strong: ({ node, ...props }) => <FlowText tag="strong" {...props} />,
+  em: ({ node, ...props }) => <FlowText tag="em" {...props} />,
   img: ({ alt }) => <span>{alt}</span>,
   a: ({ href, children }) => /^https?:\/\//i.test(href || '') ? <a href={href} target="_blank" rel="noreferrer">{children}</a> : <span>{children}</span>,
 }
 
-export default function Markdown({ text, generating, sandboxEnabled, theme }) {
+export default memo(function Markdown({ text, generating, sandboxEnabled, theme }) {
   return <Rendering.Provider value={{ generating, sandboxEnabled, theme }}>
     <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
       {text}
     </ReactMarkdown>
   </Rendering.Provider>
-}
+})

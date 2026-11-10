@@ -2,8 +2,12 @@ import { createElement, useEffect, useRef, useState } from 'react'
 import { ArrowDownToLine, ArrowLeft, ChevronLeft, ChevronRight, LoaderCircle, Minus, Plus } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import { IconButton, Modal } from './ui.jsx'
 import { embeddedFileUrl, formatFileSize, previewFormat, readFilePreview } from './preview-data.js'
+import { previewMathParts } from './preview-math.js'
 
 const documentTags = new Set('a b blockquote br caption code dd div dl dt em h1 h2 h3 h4 h5 h6 hr i img li ol p pre s span strong sub sup table tbody td th thead tr u ul'.split(' '))
 const markdownElements = {
@@ -13,9 +17,11 @@ const markdownElements = {
 
 function readDocumentNodes(content, imageUrls) {
   let remaining = 6000
-  function read(node, key, depth) {
+  function read(node, key, depth, literal = false) {
     if (depth > 40 || --remaining < 0) return null
-    if (node.nodeType === 3) return node.textContent
+    if (node.nodeType === 3) return literal ? node.textContent : previewMathParts(node.textContent).map((part, index) => (
+      part.html ? <span key={index} className={part.display ? 'preview-math-block' : 'preview-math'} dangerouslySetInnerHTML={{ __html: part.html }} /> : part.text
+    ))
     const tag = node.localName
     if (!documentTags.has(tag)) return null
     if (tag === 'img') {
@@ -28,7 +34,7 @@ function readDocumentNodes(content, imageUrls) {
       props.colSpan = Math.min(Number(node.getAttribute('colspan')) || 1, 24)
       props.rowSpan = Math.min(Number(node.getAttribute('rowspan')) || 1, 100)
     }
-    const children = Array.from(node.childNodes, (child, index) => read(child, index, depth + 1))
+    const children = Array.from(node.childNodes, (child, index) => read(child, index, depth + 1, literal || tag === 'code' || tag === 'pre'))
     return createElement(tag === 'a' ? 'span' : tag, props, children)
   }
   const nodes = Array.from(content.childNodes, (node, index) => read(node, index, 0))
@@ -254,7 +260,7 @@ function ActiveFile({ file, goBack, onOpenEntry }) {
       </div>}
       {preview.kind === 'text' && <div className="preview-scroll" tabIndex={0} aria-label="Aperçu du texte">
         {format === 'md' || format === 'markdown' ? <div className="preview-document">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownElements} skipHtml>{preview.text}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownElements} skipHtml>{preview.text}</ReactMarkdown>
         </div> : <pre className="preview-text">{preview.text || 'Fichier vide.'}</pre>}
       </div>}
       {preview.legacy && <p className="preview-status">Extrait conservé dans l’historique.</p>}

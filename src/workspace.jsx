@@ -4,10 +4,13 @@ import {
   Pencil, RotateCw, Share, SquarePen, ThumbsDown, ThumbsUp, Trash2,
 } from 'lucide-react'
 import { Composer, FileChip, IconButton, Modal, ModelControl, Setup, Sidebar } from './ui.jsx'
-import { defaultSettings, getEffortLevel, runChat } from './inference.js'
+import { defaultSettings, generateChatTitle, getEffortLevel, runChat } from './inference.js'
 import { chatTools } from './tools.js'
 import CodeFiles from './code-files.jsx'
 import FilePreviewTrigger from './file-preview-trigger.jsx'
+import AnswerActivity from './answer-activity.jsx'
+import useStreamedText from './use-streamed-text.js'
+import { initialChatTitle } from './chat-title.js'
 import { deleteChat, loadWorkspace, saveChat, saveSettings } from './storage.js'
 
 const Markdown = lazy(() => import('./markdown.jsx'))
@@ -27,26 +30,12 @@ function CopyAction({ label, text }) {
   return <IconButton label={copied ? 'Copié' : label} onClick={copy}>{copied ? <Check size={19} /> : <Copy size={19} />}</IconButton>
 }
 
-function GenerationStatus({ progress }) {
-  const [elapsed, setElapsed] = useState(0)
-  const { label, startedAt } = progress
-  useEffect(() => {
-    const timer = setInterval(() => setElapsed(Math.floor((performance.now() - startedAt) / 1000)), 1000)
-    return () => clearInterval(timer)
-  }, [startedAt])
-  const duration = elapsed < 60 ? `${elapsed} s` : `${Math.floor(elapsed / 60)} min ${elapsed % 60} s`
-  return <div className="generation-status" role="status">
-    <LoaderCircle className="spinner" size={16} aria-hidden="true" />
-    <span className="generation-label">{label}…</span>
-    {elapsed >= 2 && <span className="generation-elapsed" aria-hidden="true">{duration}</span>}
-  </div>
-}
-
 function Answer({ message, generating, progress, onRate, onRegenerate, menu, setMenu, sandboxEnabled, theme }) {
   const markdown = useRef(null)
   const [shared, setShared] = useState(false)
   const menuId = `answer-${message.id}`
   const text = () => markdown.current?.innerText || message.text
+  const shown = useStreamedText(message.text, generating)
 
   async function share() {
     try {
@@ -67,17 +56,13 @@ function Answer({ message, generating, progress, onRate, onRegenerate, menu, set
   return <article className="answer" data-learning={message.learning || undefined}>
     <div className="answer-mark"><img src="/ocean.svg" alt="Ocean" /></div>
     <div className="answer-body">
-      {generating && <GenerationStatus progress={progress} />}
-      {!!message.activity?.length && <details className="answer-activity">
-        <summary>Activité <ChevronDown size={14} /></summary>
-        <ol>{message.activity.map((step, index) => <li key={index}>{step}</li>)}</ol>
-      </details>}
+      <AnswerActivity steps={message.activity} progress={progress} generating={generating} />
       {message.reasoning && <details className="reflection">
         <summary>Réflexion <ChevronDown size={14} /></summary>
         <p>{message.reasoning}</p>
       </details>}
-      {message.text && <div className="markdown" ref={markdown}>
-        <Suspense fallback={<p>{message.text}</p>}><Markdown text={message.text} generating={generating} sandboxEnabled={sandboxEnabled} theme={theme} /></Suspense>
+      {shown && <div className="markdown" ref={markdown} data-streaming={generating || undefined}>
+        <Suspense fallback={<p>{shown}</p>}><Markdown text={shown} generating={generating} sandboxEnabled={sandboxEnabled} theme={theme} /></Suspense>
       </div>}
       <CodeFiles files={message.artifacts} />
       {!generating && !!message.sources?.length && <details className="sources">
@@ -142,6 +127,8 @@ function UserMessage({ message, onEdit }) {
 export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, theme, onThemeChange }) {
   const [settings, setSettings] = useState(defaultSettings)
   const [chats, setChats] = useState([])
+  const chatsRef = useRef([])
+  const titleRequests = useRef(new Map())
   const [activeId, setActiveId] = useState('')
   const [sideOpen, setSideOpen] = useState(() => matchMedia('(min-width: 850px)').matches)
   const [ready, setReady] = useState(false)
@@ -184,7 +171,8 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
         }
         setSettings(restored)
       } else setSetup('onboarding')
-      setChats(savedChats.sort((a, b) => b.updatedAt - a.updatedAt))
+      chatsRef.current = savedChats.sort((a, b) => b.updatedAt - a.updatedAt)
+      setChats(chatsRef.current)
     }).catch(() => { if (active) setError('Impossible de lire l’historique local du navigateur.') })
       .finally(() => { if (active) setReady(true) })
     return () => {
@@ -192,6 +180,7 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
       attachmentRead.current?.abort()
       attachmentRead.current = null
       request.current?.abort()
+      for (const controller of titleRequests.current.values()) controller.abort()
     }
   }, [user.id])
 
@@ -213,9 +202,27 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
 
   function storageError() { setError('Le navigateur n’a pas pu enregistrer les données localement.') }
 
-  function storeChat(chat) {
-    setChats(current => [chat, ...current.filter(other => other.id !== chat.id)].sort((a, b) => b.updatedAt - a.updatedAt))
-    void saveChat(user.id, chat).catch(storageError)
+  function storeChat(chat, updateTitle = false) {
+    const current = chatsRef.current.find(item => item.id === chat.id)
+    const saved = current && !updateTitle ? { ...chat, title: current.title, titleSource: current.titleSource } : chat
+    chatsRef.current = [saved, ...chatsRef.current.filter(other => other.id !== chat.id)].sort((a, b) => b.updatedAt - a.updatedAt)
+    setChats(chatsRef.current)
+    void saveChat(user.id, saved).catch(storageError)
+  }
+
+  function summarizeTitle(chat, answer) {
+    const current = chatsRef.current.find(item => item.id === chat.id)
+    if (chat.messages.length !== 1 || current?.titleSource !== 'pending') return
+    const controller = new AbortController()
+    titleRequests.current.set(chat.id, controller)
+    void generateChatTitle(settings, chat.messages[0], answer, controller.signal).then(title => {
+      const latest = chatsRef.current.find(item => item.id === chat.id)
+      if (title && !controller.signal.aborted && latest?.titleSource === 'pending') {
+        storeChat({ ...latest, title, titleSource: 'auto' }, true)
+      }
+    }).catch(() => {}).finally(() => {
+      if (titleRequests.current.get(chat.id) === controller) titleRequests.current.delete(chat.id)
+    })
   }
 
   function changeSettings(changes) {
@@ -276,6 +283,7 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
 
   async function generate(chat, previousChat) {
     if (request.current) return
+    for (const pending of titleRequests.current.values()) pending.abort()
     const controller = new AbortController()
     request.current = controller
     follow.current = true
@@ -301,6 +309,7 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
         },
       })
       storeChat({ ...chat, messages: [...chat.messages, { ...latest, ...response, reasoning: chat.learning ? '' : response.reasoning }], updatedAt: Date.now() })
+      summarizeTitle(chat, response.text)
     } catch (problem) {
       if (latest.artifacts?.length || (!previousChat && (latest.text.trim() || latest.activity.length))) {
         storeChat({ ...chat, messages: [...chat.messages, latest], updatedAt: Date.now() })
@@ -317,8 +326,8 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
     const text = value.trim()
     const { images, documents } = attachments
     if (request.current || attachmentRead.current || !ready || (!text && !images.length && !documents.length)) return
-    const title = (text || documents[0]?.name || 'Capture d’écran').replace(/\s+/g, ' ').slice(0, 54)
-    const chat = activeChat || { id: crypto.randomUUID(), title, messages: [] }
+    const title = initialChatTitle(text, documents)
+    const chat = activeChat || { id: crypto.randomUUID(), title, titleSource: 'pending', messages: [] }
     const message = { id: crypto.randomUUID(), role: 'user', text, ...attachments }
     const next = { ...chat, learning, updatedAt: Date.now(), messages: [...chat.messages, message] }
     setActiveId(next.id)
@@ -358,15 +367,18 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
     if (!dialogChat || dialog.pending) return
     if (renaming) {
       if (!titleDraft.trim()) return
-      storeChat({ ...dialogChat, title: titleDraft.trim() })
+      titleRequests.current.get(dialogChat.id)?.abort()
+      storeChat({ ...dialogChat, title: titleDraft.trim(), titleSource: 'manual' }, true)
       closeDialog()
       return
     }
 
     setDialog({ ...dialog, pending: true, error: '' })
+    titleRequests.current.get(dialogChat.id)?.abort()
     try {
       await deleteChat(user.id, dialogChat.id)
-      setChats(current => current.filter(chat => chat.id !== dialogChat.id))
+      chatsRef.current = chatsRef.current.filter(chat => chat.id !== dialogChat.id)
+      setChats(chatsRef.current)
       if (dialogChat.id === activeId) openChat()
       setDialog(null)
     } catch {
@@ -377,6 +389,7 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
   async function signOut() {
     try {
       request.current?.abort()
+      for (const controller of titleRequests.current.values()) controller.abort()
       await onSignOut()
     } catch {
       setError('Impossible de te déconnecter. Réessaie.')

@@ -28,6 +28,15 @@ test('un fichier Excel conserve le type des cellules et le texte qui commence pa
   assert.deepEqual(await readSheet(artifactBytes(file)), rows)
 })
 
+test('un Word conserve le LaTeX pour son aperçu sans interpréter les indices comme de l’emphase', async () => {
+  const { artifacts: [file] } = await createFile({ name: 'formules.docx', content: '# Champ\n\nLe champ $E_0 = \\frac{4kq}{a^2}$ vaut\n\n$$\n\\vec{E}(O) = \\vec{0}\n$$\n\nLittéral : `$a_0$`.' }, signal)
+  const { value } = await mammoth.extractRawText({ buffer: artifactBytes(file) })
+  assert.match(value, /\$E_0 = \\frac\{4kq\}\{a\^2\}\$/)
+  assert.match(value, /\$\$\\vec\{E\}\(O\) = \\vec\{0\}\$\$/)
+  const html = await mammoth.convertToHtml({ buffer: artifactBytes(file) }, { styleMap: ["r[style-name='Ocean Code'] => code"] })
+  assert.match(html.value, /<code>\$a_0\$<\/code>/)
+})
+
 test('un fichier CSV échappe les séparateurs et protège les cellules texte interprétables comme formules', async () => {
   const { artifacts: [file] } = await createFile({ name: 'mesures.csv', rows: [['Un, deux', 'A "B"', '=A1', -2]] }, signal)
   assert.equal(artifactBytes(file).toString(), `\uFEFF"Un, deux","A ""B""","'=A1","-2"\r\n`)

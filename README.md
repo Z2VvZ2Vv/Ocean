@@ -70,6 +70,10 @@ Demande un document Word, un tableau Excel ou CSV, ou un fichier texte à Ocean.
 
 Pendant une réponse, Ocean indique si le navigateur lit un fichier, attend le modèle, exécute un outil ou reçoit le texte de la réponse. La section **Activité** garde les lectures et les appels d’outils de la réponse.
 
+Le panneau **Activité** s’ouvre pendant la réponse, avec une icône par étape. Les corrigés restent dans le chat. Un export Word exige une demande explicite. L’aperçu Word affiche les formules LaTeX délimitées par `$...$`, `$$...$$`, `\(...\)` ou `\[...\]`.
+
+Les nouvelles conversations reçoivent un titre résumé après la première réponse. Le renommage manuel reste prioritaire.
+
 `npm test` vérifie le protocole d’inférence avec un serveur simulé. `npm run build` compile la version de production.
 
 ## Activer la sandbox de code

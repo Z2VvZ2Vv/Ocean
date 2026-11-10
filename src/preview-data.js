@@ -112,7 +112,9 @@ export async function readFilePreview(blob, format, signal) {
     try {
       const arrayBuffer = await blob.arrayBuffer()
       signal.throwIfAborted()
-      const { value } = await mammoth.convertToHtml({ arrayBuffer }, { convertImage })
+      const { value } = await mammoth.convertToHtml({ arrayBuffer }, {
+        convertImage, styleMap: ["r[style-name='Ocean Code'] => code", "p[style-name='Ocean Code Block'] => pre"],
+      })
       signal.throwIfAborted()
       const template = document.createElement('template')
       template.innerHTML = value
