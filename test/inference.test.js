@@ -62,7 +62,7 @@ test('une image seule et les résultats des outils repartent directement vers le
       definition: { type: 'function', function: { name: 'python' } },
       run: async args => {
         assert.deepEqual(args, { code: 'print(2*3)' })
-        return { output: '6' }
+        return { output: '6', artifacts: [{ name: 'calcul.png', mime: 'image/png', url: image }] }
       },
     }],
   })
@@ -71,7 +71,8 @@ test('une image seule et les résultats des outils repartent directement vers le
   assert.equal(calls[0].thinking_budget_tokens, 8192)
   assert.match(calls[0].messages[0].content, /ne révèle ni le résultat final/)
   assert.deepEqual(calls[0].messages[1].content, [{ type: 'image_url', image_url: { url: image } }])
-  assert.deepEqual(calls[1].messages.at(-1), { role: 'tool', tool_call_id: 'calc', content: '{"output":"6"}' })
+  assert.deepEqual(calls[1].messages.at(-1), { role: 'tool', tool_call_id: 'calc', content: '{"output":"6","fichiers":["calcul.png"]}' })
+  assert.deepEqual(answer.artifacts, [{ name: 'calcul.png', mime: 'image/png', url: image }])
   assert.ok(updates.every(update => !update.text.includes('<think') && !update.text.includes('<thi')))
   assert.equal(answer.reasoning, 'Vérification')
   assert.equal(answer.text, 'Quel serait ton premier indice ?')

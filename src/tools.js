@@ -1,34 +1,4 @@
-function runPython({ code }, signal) {
-  if (typeof code !== 'string' || !code.trim() || code.length > 12000) throw new Error('Code Python invalide.')
-  signal.throwIfAborted()
-  return new Promise((resolve, reject) => {
-    const frame = document.createElement('iframe')
-    frame.hidden = true
-    frame.sandbox = 'allow-scripts'
-    frame.src = '/python-sandbox.html'
-    frame.title = 'Exécution Python isolée'
-    const channel = new MessageChannel()
-    const timeout = setTimeout(() => done(reject, new Error('Exécution Python interrompue après 45 secondes.')), 45000)
-    const abort = () => done(reject, signal.reason)
-
-    function done(callback, value) {
-      clearTimeout(timeout)
-      signal.removeEventListener('abort', abort)
-      channel.port1.close()
-      frame.remove()
-      callback(value)
-    }
-
-    channel.port1.onmessage = ({ data }) => {
-      const output = typeof data?.output === 'string' ? data.output.slice(0, 12000) : ''
-      const error = typeof data?.error === 'string' ? data.error.slice(0, 3000) : ''
-      done(resolve, error ? { output, error } : { output })
-    }
-    signal.addEventListener('abort', abort, { once: true })
-    frame.onload = () => frame.contentWindow.postMessage({ code }, '*', [channel.port2])
-    document.body.append(frame)
-  })
-}
+import { runCode, runnableLanguages } from './code.js'
 
 async function searchWeb({ query }, signal) {
   if (typeof query !== 'string' || !query.trim() || query.length > 400) throw new Error('Requête web invalide.')
@@ -40,18 +10,43 @@ async function searchWeb({ query }, signal) {
   return data
 }
 
-export function chatTools(searchEnabled) {
+export function chatTools(searchEnabled, sandboxEnabled) {
   const tools = [{
     label: 'Exécution de Python',
     definition: {
       type: 'function',
       function: {
         name: 'python',
-        description: 'Exécute du Python 3 isolé pour vérifier un calcul ou transformer des données. Utilise print pour renvoyer le résultat. Bibliothèque standard disponible.',
-        parameters: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false },
+        description: sandboxEnabled
+          ? 'Exécute du Python 3 isolé. Pour des bibliothèques PyPI hors du navigateur, renseigne packages avec leurs noms de distribution et enregistre les fichiers dans artifacts/. Sinon, utilise Matplotlib ou écris les fichiers dans le dossier courant. Utilise print pour les résultats texte.'
+          : 'Exécute du Python 3 isolé dans le navigateur. Utilise print pour les résultats texte. Pour produire un graphique ou un fichier, utilise Matplotlib ou écris un PNG, CSV, TXT ou JSON dans le dossier courant.',
+        parameters: {
+          type: 'object', properties: {
+            code: { type: 'string' }, stdin: { type: 'string' },
+            ...(sandboxEnabled && { packages: { type: 'array', items: { type: 'string' }, maxItems: 8 } }),
+          }, required: ['code'], additionalProperties: false,
+        },
       },
     },
-    run: runPython,
+    run: (args, signal) => runCode({ ...args, language: 'python' }, sandboxEnabled, signal),
+  }, {
+    label: 'Exécution du code',
+    definition: {
+      type: 'function',
+      function: {
+        name: 'run_code',
+        description: sandboxEnabled
+          ? 'Compile ou exécute un programme complet. Donne le code et, si nécessaire, son entrée standard. Écris les fichiers PNG, CSV, TXT ou JSON à transmettre dans le dossier artifacts/. Pour Java, utilise une classe Main.'
+          : 'Exécute du JavaScript dans le navigateur, sans Node.js. Utilise console.log pour renvoyer le résultat et readLine() pour lire une ligne de stdin.',
+        parameters: {
+          type: 'object', properties: {
+            language: { type: 'string', enum: sandboxEnabled ? runnableLanguages.filter(id => id !== 'python') : ['javascript'] },
+            code: { type: 'string' }, stdin: { type: 'string' },
+          }, required: ['language', 'code'], additionalProperties: false,
+        },
+      },
+    },
+    run: (args, signal) => runCode(args, sandboxEnabled, signal),
   }]
   if (searchEnabled) tools.push({
     label: 'Recherche sur le web',

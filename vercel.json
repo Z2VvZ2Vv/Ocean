@@ -3,6 +3,9 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/code.js": { "maxDuration": 120 }
+  },
   "headers": [
     {
       "source": "/",

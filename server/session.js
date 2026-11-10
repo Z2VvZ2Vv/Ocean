@@ -27,13 +27,13 @@ export function cookie(req, name, value, age) {
   return `${name}=${value}; Path=/; Max-Age=${age}; HttpOnly; SameSite=Strict${secure}`
 }
 
-export async function readJson(req) {
+export async function readJson(req, limit = 16384) {
   if (!req.headers['content-type']?.startsWith('application/json')) throw new Error('JSON requis.')
   if (req.body !== undefined) return typeof req.body === 'string' ? JSON.parse(req.body) : req.body
   let data = ''
   for await (const chunk of req) {
     data += chunk.toString()
-    if (data.length > 16384) throw new Error('Requête trop volumineuse.')
+    if (data.length > limit) throw new Error('Requête trop volumineuse.')
   }
   return JSON.parse(data)
 }
@@ -50,8 +50,16 @@ export function searchConfigured() {
   return Boolean(process.env.BRAVE_SEARCH_API_KEY)
 }
 
+function allowedEmails() {
+  return (process.env.ALLOWED_GOOGLE_EMAILS || '').split(',').map(item => item.trim().toLowerCase()).filter(Boolean)
+}
+
+export function codeSandboxConfigured() {
+  return process.env.OCEAN_CODE_SANDBOX === '1' && allowedEmails().length > 0
+}
+
 function allowed(email) {
-  const emails = (process.env.ALLOWED_GOOGLE_EMAILS || '').split(',').map(item => item.trim().toLowerCase()).filter(Boolean)
+  const emails = allowedEmails()
   return !emails.length || emails.includes(email.toLowerCase())
 }
 

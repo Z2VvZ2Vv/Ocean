@@ -6,6 +6,7 @@ import {
 import { Composer, FileChip, IconButton, Modal, ModelControl, Setup, Sidebar } from './ui.jsx'
 import { defaultSettings, getEffortLevel, runChat } from './inference.js'
 import { chatTools } from './tools.js'
+import CodeFiles from './code-files.jsx'
 import { deleteChat, loadWorkspace, saveChat, saveSettings } from './storage.js'
 
 const Markdown = lazy(() => import('./markdown.jsx'))
@@ -25,7 +26,7 @@ function CopyAction({ label, text }) {
   return <IconButton label={copied ? 'Copié' : label} onClick={copy}>{copied ? <Check size={19} /> : <Copy size={19} />}</IconButton>
 }
 
-function Answer({ message, generating, progress, onRate, onRegenerate, menu, setMenu }) {
+function Answer({ message, generating, progress, onRate, onRegenerate, menu, setMenu, sandboxEnabled, theme }) {
   const markdown = useRef(null)
   const [shared, setShared] = useState(false)
   const menuId = `answer-${message.id}`
@@ -56,8 +57,9 @@ function Answer({ message, generating, progress, onRate, onRegenerate, menu, set
         <p>{message.reasoning}</p>
       </details>}
       {message.text && <div className="markdown" ref={markdown}>
-        <Suspense fallback={<p>{message.text}</p>}><Markdown text={message.text} /></Suspense>
+        <Suspense fallback={<p>{message.text}</p>}><Markdown text={message.text} generating={generating} sandboxEnabled={sandboxEnabled} theme={theme} /></Suspense>
       </div>}
+      <CodeFiles files={message.artifacts} />
       {!generating && !!message.sources?.length && <details className="sources">
         <summary>Sources consultées <ChevronDown size={14} /></summary>
         <ul>{message.sources.map(source => <li key={source.url}>
@@ -115,7 +117,7 @@ function UserMessage({ message, onEdit }) {
   </article>
 }
 
-export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange }) {
+export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, theme, onThemeChange }) {
   const [settings, setSettings] = useState(defaultSettings)
   const [chats, setChats] = useState([])
   const [activeId, setActiveId] = useState('')
@@ -264,7 +266,7 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
     try {
       const response = await runChat({
         config: settings, messages: chat.messages, learning: chat.learning,
-        tools: chatTools(searchEnabled), signal: controller.signal,
+        tools: chatTools(searchEnabled, sandboxEnabled), signal: controller.signal,
         onUpdate: update => {
           latest = { ...blank, ...update, reasoning: chat.learning ? '' : update.reasoning }
           setLive(latest)
@@ -388,7 +390,7 @@ export function Workspace({ user, searchEnabled, onSignOut, theme, onThemeChange
             ? <UserMessage key={message.id} message={message} onEdit={!busy && !reading && index === lastUser
               ? text => retryResponse({ ...activeChat, messages: [...messages.slice(0, index), { ...message, text }] })
               : undefined} />
-            : <Answer key={message.id} message={message} generating={message.id === live?.id} progress={progress}
+            : <Answer key={message.id} message={message} generating={message.id === live?.id} progress={progress} sandboxEnabled={sandboxEnabled} theme={theme}
               onRate={busy ? undefined : rating => rate(message, rating)} menu={menu} setMenu={setMenu}
               onRegenerate={!busy && !reading && !retry && index === messages.length - 1
                 ? () => retryResponse({ ...activeChat, messages: messages.slice(0, index) }) : undefined} />)}

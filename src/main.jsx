@@ -133,7 +133,7 @@ function App() {
     setSession(await auth())
   }
 
-  if (session?.user) return <Workspace key={session.user.id} user={session.user} searchEnabled={session.search} onSignOut={signOut}
+  if (session?.user) return <Workspace key={session.user.id} user={session.user} searchEnabled={session.search} sandboxEnabled={session.codeSandbox} onSignOut={signOut}
     theme={theme} onThemeChange={changeTheme} />
   return <SignIn session={session} error={error} onSignIn={setSession} theme={theme}
     onPreview={() => setSession({ preview: true, user: { id: 'ocean-local-preview', name: 'Geoff' } })} />

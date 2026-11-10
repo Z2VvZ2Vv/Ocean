@@ -25,6 +25,7 @@ Ouvre http://localhost:5173. Le bouton **Ouvrir l’aperçu local** donne accès
 | `SESSION_SECRET` | Secret aléatoire d’au moins 32 octets. Génère-le avec `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`. |
 | `ALLOWED_GOOGLE_EMAILS` | Facultatif. Adresses autorisées séparées par des virgules. Pour un usage personnel avec la recherche web, ajoute ton adresse afin de limiter l’accès à ton quota. |
 | `BRAVE_SEARCH_API_KEY` | Facultatif. Active la recherche web avec Brave. La requête de recherche choisie par le modèle passe par Vercel vers Brave. |
+| `OCEAN_CODE_SANDBOX` | Facultatif. Mets `1` pour l’exécution cloud des programmes, avec `ALLOWED_GOOGLE_EMAILS` renseigné. |
 
 Chaque domaine de preview utilisé avec Google doit être déclaré comme origine JavaScript autorisée. Voir [Google Identity Services](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid) et [Vite sur Vercel](https://vercel.com/docs/frameworks/frontend/vite).
 
@@ -58,6 +59,7 @@ L’adresse préremplie dans Ocean est `http://pop-os-comfyui.tail917fd3.ts.net:
 - **Apprentissage guidé** se trouve dans le menu **+**. Il demande au modèle de donner un indice à la fois et d’attendre la tentative de l’élève. Le respect de cette consigne dépend du modèle chargé.
 - **Réflexion** se trouve dans le menu du modèle. Choisis **Bas**, **Moyen** ou **Élevé**. **Élevé** est le réglage par défaut et correspond à `xhigh` côté API.
 - **Python** s’exécute dans un worker isolé du navigateur. Le moteur Pyodide est téléchargé depuis jsDelivr au besoin. **Recherche web** utilise la clé Brave si elle est configurée. Le modèle choisit d’appeler les outils via son template de function calling.
+- **Schémas et code**. Ocean affiche les blocs Mermaid comme des schémas ou des graphiques. Les blocs de code identifiés par leur langage sont colorés et copiables. Le bouton **Exécuter** affiche la sortie ou les erreurs sous le programme. Python et JavaScript de base fonctionnent dans le navigateur.
 - **OneNote**. Colle dans le champ du chat. Quand le navigateur reçoit une image avec le texte ou le HTML de la sélection, Ocean joint uniquement l’image. Si OneNote fournit exclusivement du texte au navigateur, utilise une capture Windows (`Win+Maj+S`) et colle-la.
 - **Fichiers**. Utilise **+ → Ajouter des fichiers** ou dépose les fichiers sur le champ de saisie. Ocean lit le texte des PDF et des DOCX, les cellules des XLSX et les fichiers texte courants (TXT, Markdown, CSV, JSON ou code). Les pages de PDF scannées sans texte sont envoyées comme images et nécessitent un modèle compatible vision.
 - **Apparence**. Choisis **Clair**, **Sombre** ou **Système** dans les paramètres. Ocean mémorise le choix dans le navigateur.
@@ -65,4 +67,12 @@ L’adresse préremplie dans Ocean est `http://pop-os-comfyui.tail917fd3.ts.net:
 Par message, tu peux joindre jusqu’à 4 documents de 12 Mo chacun, avec 45 000 caractères extraits au total. Les PDF sont limités à 100 pages et les pages scannées comptent dans la limite de 4 images par message.
 
 `npm test` vérifie le protocole d’inférence avec un serveur simulé. `npm run build` compile la version de production.
+
+## Activer la sandbox de code
+
+Sur Vercel, ajoute `OCEAN_CODE_SANDBOX=1` à l’environnement **Production** et renseigne les comptes autorisés dans `ALLOWED_GOOGLE_EMAILS`, puis redéploie. Le projet utilise l’authentification OIDC de Vercel. Si elle a été désactivée dans les paramètres du projet, réactive-la. [Authentification Vercel Sandbox](https://vercel.com/docs/sandbox/concepts/authentication)
+
+La sandbox exécute JavaScript (Node.js), TypeScript, Bash, C, C++, C#, Java, Go, Rust, Ruby et PHP. Python bascule vers la sandbox si un module manque dans le navigateur ou si tu renseignes **Paquets PyPI à installer** dans le bloc. Indique les noms des paquets ou des versions exactes comme `numpy==2.2.6`. Ocean installe les distributions binaires disponibles sur PyPI avant d’exécuter le programme. Le code exécuté dans la sandbox est envoyé à Vercel. Ton navigateur contacte directement le modèle IA via Tailscale.
+
+Dans le navigateur, Python peut afficher les graphiques Matplotlib et les fichiers PNG, JPEG, WebP, CSV, TXT et JSON créés dans son dossier de travail. Dans la sandbox, enregistre les fichiers à récupérer dans `artifacts/`. Ocean affiche les images dans le chat et propose de télécharger les fichiers. Chaque exécution rapporte jusqu’à trois fichiers de 750 ko chacun. Le plan Hobby inclut un quota de sandbox. [Quotas Vercel Sandbox](https://vercel.com/docs/sandbox/pricing)
 
