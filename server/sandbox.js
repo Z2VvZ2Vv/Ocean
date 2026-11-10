@@ -1,5 +1,6 @@
 import { Sandbox } from '@vercel/sandbox'
-import { artifactBytes, artifactLimit, artifactType, codeLanguage } from '../src/code.js'
+import { artifactBytes, artifactLimit, artifactType, codeLanguage, interactiveRunTimeout } from '../src/code.js'
+import { relaySource } from './terminal-relay.js'
 
 const pythonEntry = `
 import runpy
@@ -52,6 +53,52 @@ async function stage(sandbox, command, stdinPath, outputPath, { timeoutMs, fileL
   return { exitCode: process.exitCode, output: bytes.toString('utf8') + (truncated ? '\n… (sortie tronquée)' : '') }
 }
 
+async function runTerminal(sandbox, command, { signal, onSession, onOutput }) {
+  const process = await sandbox.runCommand({
+    cmd: 'bash', args: ['-c', 'ulimit -f 2048; exec node -e "$@"', 'ocean', relaySource, '--', ...command],
+    env: { OCEAN_OUTPUT_DIR: 'artifacts', GOTOOLCHAIN: 'local', PYTHONPATH: '.ocean-deps', MPLBACKEND: 'Agg', PYTHONUNBUFFERED: '1' },
+    detached: true, stdin: true, timeoutMs: 62000, signal,
+  })
+  await onSession({ name: sandbox.name, sessionId: sandbox.currentSession().sessionId, commandId: process.cmdId })
+  let output = ''
+  function append(text) {
+    const part = text.slice(0, 12100 - output.length)
+    output += part
+    if (part) onOutput(part)
+  }
+  async function relay() {
+    let pending = ''
+    for await (const log of process.logs({ signal })) {
+      if (log.stream === 'stderr') {
+        append(log.data)
+        continue
+      }
+      pending += log.data
+      let newline
+      while ((newline = pending.indexOf('\n')) >= 0) {
+        const line = pending.slice(0, newline)
+        pending = pending.slice(newline + 1)
+        try {
+          const event = JSON.parse(line)
+          if (typeof event.output === 'string') append(event.output)
+        } catch { /* Ignore malformed relay records. */ }
+      }
+      if (pending.length > 80000) throw new Error('Sortie de la console invalide.')
+    }
+  }
+  const [finished] = await Promise.all([process.wait({ signal }), relay()])
+  return { output, exitCode: finished.exitCode }
+}
+
+export async function writeSandboxInput({ name, sessionId, commandId }, line, signal) {
+  const sandbox = await Sandbox.get({ name, resume: false, signal })
+  const session = sandbox.currentSession()
+  if (session.sessionId !== sessionId || session.status !== 'running') throw new Error('Cette exécution est terminée.')
+  const command = await session.getCommand(commandId, { signal })
+  if (line === null) await command.closeStdin({ abortSignal: signal })
+  else await command.writeStdin(`${line}\n`, { abortSignal: signal })
+}
+
 async function collectArtifacts(sandbox, language, signal) {
   const folders = language === 'python' ? ['artifacts', '.'] : ['artifacts']
   const listing = await sandbox.runCommand({
@@ -73,8 +120,8 @@ async function collectArtifacts(sandbox, language, signal) {
   return files
 }
 
-export async function runSandboxCode({ language, code, stdin, packages = [], files = [] }, signal, {
-  createSandbox = options => Sandbox.create(options), onProgress = () => {},
+export async function runSandboxCode({ language, code, stdin, packages = [], files = [], interactive = false }, signal, {
+  createSandbox = options => Sandbox.create(options), onProgress = () => {}, onSession = () => {}, onOutput = () => {},
 } = {}) {
   const program = programs[language]
   const target = codeLanguage(language)
@@ -82,7 +129,7 @@ export async function runSandboxCode({ language, code, stdin, packages = [], fil
   const networkPolicy = packages.length ? { allow: ['pypi.org', 'files.pythonhosted.org'] } : program.package ? 'allow-all' : 'deny-all'
   onProgress('opening')
   const sandbox = await createSandbox({
-    persistent: false, timeout: 100000, resources: { vcpus: 1 },
+    persistent: false, timeout: interactive ? interactiveRunTimeout - 10000 : 100000, resources: { vcpus: 1 },
     networkPolicy, signal,
   })
   try {
@@ -122,11 +169,12 @@ export async function runSandboxCode({ language, code, stdin, packages = [], fil
 
     const command = javaClass ? ['java', file] : program.run
     onProgress('running')
-    const run = await stage(sandbox, ['timeout', '--kill-after=1s', '8s', ...command], '.ocean-stdin', '.ocean-output', { timeoutMs: 10000, fileLimit: 2048, signal })
+    const run = interactive ? await runTerminal(sandbox, command, { signal, onSession, onOutput })
+      : await stage(sandbox, ['timeout', '--kill-after=1s', '8s', ...command], '.ocean-stdin', '.ocean-output', { timeoutMs: 10000, fileLimit: 2048, signal })
     onProgress('reading')
     const artifacts = await collectArtifacts(sandbox, language, signal)
     const output = [build?.output, run.output].filter(Boolean).join('\n').slice(0, 12000)
-    const error = run.exitCode === 124 ? 'Le programme a dépassé la limite de 8 secondes.'
+    const error = run.exitCode === 124 ? `Le programme a dépassé la limite de ${interactive ? 60 : 8} secondes.`
       : run.exitCode === null || run.exitCode === 137 ? 'L’exécution a été interrompue.'
       : run.exitCode !== 0 ? `Le programme s’est arrêté (code ${run.exitCode}).` : ''
     return { output, artifacts, ...(error && { error }) }

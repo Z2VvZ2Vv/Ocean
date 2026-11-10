@@ -21,6 +21,7 @@ export const runnableLanguages = Object.keys(languages)
 export const codeLimit = 12000
 export const inputLimit = 8000
 export const cloudRunTimeout = 100000
+export const interactiveRunTimeout = 175000
 export const codeStreamType = 'application/x-ndjson'
 export const artifactLimit = 3
 export const artifactBytes = 750000
@@ -29,7 +30,7 @@ export const cloudFileLimit = 2500000
 export const inputFilename = /^[a-z0-9][a-z0-9_.-]{0,109}$/i
 export const artifactTypes = Object.freeze({
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
-  csv: 'text/csv', txt: 'text/plain', json: 'application/json',
+  csv: 'text/csv', txt: 'text/plain', json: 'application/json', zip: 'application/zip',
 })
 
 export function codeLanguage(label) {
@@ -153,7 +154,7 @@ async function encodeCloudFiles(files, signal) {
   return encoded
 }
 
-async function readCodeResponse(response, onProgress) {
+async function readCodeResponse(response, onProgress, terminal) {
   if (!response.headers.get('content-type')?.includes(codeStreamType) || !response.body) return response.json().catch(() => null)
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
   let pending = ''
@@ -170,6 +171,8 @@ async function readCodeResponse(response, onProgress) {
         const event = JSON.parse(line)
         if (event.result) return event.result
         if (typeof event.phase === 'string') onProgress?.(event.phase)
+        if (typeof event.output === 'string') terminal?.onOutput(event.output)
+        if (typeof event.session === 'string') terminal?.onSession(event.session)
       }
     }
   } finally {
@@ -178,12 +181,12 @@ async function readCodeResponse(response, onProgress) {
   }
 }
 
-export async function runCode({ language, code, stdin = '', packages = [], files = [] }, sandboxEnabled, signal, onProgress) {
+export async function runCode({ language, code, stdin = '', packages = [], files = [] }, sandboxEnabled, signal, onProgress, terminal) {
   const target = codeLanguage(language)
   if (!target) throw new Error('Ce langage ne peut pas être exécuté dans Ocean.')
   validateProgram(code, stdin)
   packages = validatePackages(packages)
-  if (target.id === 'python' && !packages.length) {
+  if (target.id === 'python' && !packages.length && !terminal) {
     onProgress?.('browser')
     const local = await runPython({ code, stdin, files }, signal)
     const missing = local.error?.match(/ModuleNotFoundError: No module named ['"]([A-Za-z][\w]*)['"]/)
@@ -199,13 +202,14 @@ export async function runCode({ language, code, stdin = '', packages = [], files
 
   const inputs = files.length ? await encodeCloudFiles(files, signal) : undefined
   onProgress?.('opening')
-  const deadline = AbortSignal.timeout(cloudRunTimeout)
+  const deadline = AbortSignal.timeout(terminal ? interactiveRunTimeout : cloudRunTimeout)
   try {
     const response = await fetch('/api/code', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...(onProgress && { Accept: codeStreamType }) },
-      body: JSON.stringify({ language: target.id, code, stdin, packages, ...(inputs && { files: inputs }) }), signal: AbortSignal.any([signal, deadline]),
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...((onProgress || terminal) && { Accept: codeStreamType }) },
+      body: JSON.stringify({ language: target.id, code, stdin, packages, ...(inputs && { files: inputs }), ...(terminal && { interactive: true }) }),
+      signal: AbortSignal.any([signal, deadline]),
     })
-    const result = await readCodeResponse(response, onProgress)
+    const result = await readCodeResponse(response, onProgress, terminal)
     signal.throwIfAborted()
     deadline.throwIfAborted()
     if (!response.ok || !result) throw new Error(result?.error || 'La sandbox Vercel n’a pas répondu.')
@@ -214,5 +218,17 @@ export async function runCode({ language, code, stdin = '', packages = [], files
     signal.throwIfAborted()
     if (deadline.aborted) throw new Error('La sandbox Vercel n’a pas répondu dans le délai imparti. Relance l’exécution.')
     throw error
+  }
+}
+
+export async function sendCodeInput(session, line, signal) {
+  const response = await fetch('/api/code', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'input', session, ...(line === null ? { end: true } : { line }) }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(12000)]),
+  })
+  if (!response.ok) {
+    const result = await response.json().catch(() => null)
+    throw new Error(result?.error || 'Impossible de confirmer l’envoi de la saisie.')
   }
 }

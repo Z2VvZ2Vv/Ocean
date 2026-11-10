@@ -236,6 +236,11 @@ button { -webkit-tap-highlight-color: transparent; }
 .code-input textarea { resize: vertical; }
 .code-input-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .code-input-actions button { min-height: 32px; padding: 6px 11px; font-size: 12px; }
+.code-terminal { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 5px 0; }
+.code-terminal input {
+  flex: 1 1 160px; min-width: 0; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+}
+.code-terminal button { min-height: 32px; padding: 6px 10px; font-size: 12px; }
 .markdown .code-result > pre { padding: 5px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .markdown .code-result > p { margin: 0; }
 .code-block .hljs-keyword, .code-block .hljs-selector-tag, .code-block .hljs-meta { color: light-dark(#7932a6, #d5a4fa); }

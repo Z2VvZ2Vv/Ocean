@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BlobWriter, TextReader, ZipWriter } from '@zip.js/zip.js'
+import { BlobReader, BlobWriter, TextReader, ZipWriter } from '@zip.js/zip.js'
 import { readAttachments } from '../src/attachments.js'
 import { fileTools } from '../src/file-tools.js'
 
@@ -33,4 +33,33 @@ test('un fichier dans un ZIP est lisible et peut être monté dans Python', asyn
   const [mounted] = await catalog.mount([{ file_id: 'zip', entry: 1 }], signal)
   assert.equal(mounted.name, '1-resultats.csv')
   assert.equal(await mounted.blob.text(), data.text)
+})
+
+test('une réponse suivante peut archiver les octets du graphique déjà affiché', async () => {
+  const signal = new AbortController().signal
+  const bytes = Buffer.from('graphique original')
+  const name = 'graphique-1.png'
+  const messages = [
+    { role: 'user', text: 'Trace le graphique.' },
+    { role: 'assistant', artifacts: [{ name, url: `data:image/png;base64,${bytes.toString('base64')}` }] },
+    { role: 'user', text: 'Mets ce graphique dans un ZIP.' },
+  ]
+  const catalog = fileTools(messages)
+  const list = catalog.tools.find(tool => tool.definition.function.name === 'list_attachments')
+  const { files: [file] } = await list.run({ query: name }, signal)
+  assert.equal(file.source, 'generated')
+  assert.equal(file.name, name)
+  const [mounted] = await catalog.mount([{ file_id: file.id }], signal)
+  assert.deepEqual(Buffer.from(await mounted.blob.arrayBuffer()), bytes)
+
+  const writer = new ZipWriter(new BlobWriter('application/zip'), { useWebWorkers: false })
+  await writer.add(name, new BlobReader(mounted.blob))
+  const zip = Buffer.from(await (await writer.close()).arrayBuffer())
+  messages.push({ role: 'assistant', artifacts: [{ name: 'graphique-1.zip', url: `data:application/zip;base64,${zip.toString('base64')}` }] })
+  const next = fileTools(messages)
+  const read = next.tools.find(tool => tool.definition.function.name === 'read_attachment')
+  const archive = await read.run({ file_id: 'generated-4-1' }, signal)
+  assert.equal(archive.entries[0].name, name)
+  const [extracted] = await next.mount([{ file_id: 'generated-4-1', entry: 1 }], signal)
+  assert.deepEqual(Buffer.from(await extracted.blob.arrayBuffer()), bytes)
 })

@@ -1,18 +1,31 @@
 import { attachmentFormat } from './attachments.js'
-import { fileInputLimit, safeInputName } from './code.js'
+import { artifactType, fileInputLimit, safeInputName } from './code.js'
 
 const textFormats = new Set('txt md markdown csv tsv json jsonl xml yaml yml log ini sql py js ts jsx tsx html css java c cpp h hpp rs go sh ps1 tex'.split(' '))
 const imageFormats = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif'])
 const textLimit = 12000
 
 function documentInfo(file) {
-  return { id: file.id, name: file.name.slice(0, 180), format: file.format, bytes: file.size ?? file.blob?.size }
+  return { id: file.id, name: file.name.slice(0, 180), format: file.format, bytes: file.size ?? file.blob?.size,
+    ...(file.source && { source: file.source }) }
+}
+
+export function generatedFiles(message, turn) {
+  return (message.artifacts || []).flatMap(({ name, url }, index) => {
+    const mime = artifactType(name)
+    if (!mime || typeof url !== 'string' || !url.startsWith(`data:${mime};base64,`)) return []
+    return [{ id: `generated-${turn}-${index + 1}`, name, url, mime,
+      format: attachmentFormat(name, mime).toUpperCase(), source: 'generated' }]
+  })
 }
 
 export function attachmentCatalog(messages) {
   const files = new Map()
   for (let turn = messages.length - 1; turn >= 0; turn--) {
     const message = messages[turn]
+    if (message.role === 'assistant') {
+      for (const file of generatedFiles(message, turn + 1)) files.set(file.id, file)
+    }
     if (message.role !== 'user') continue
     const documents = [...(message.documents || []), ...(message.images || [])]
     documents.forEach((file, index) => {
@@ -89,6 +102,14 @@ function fileFormat(file) {
   return file.format === 'IMAGE' ? 'image' : attachmentFormat(file.name, file.mime || file.blob?.type)
 }
 
+async function originalBlob(file, signal) {
+  if (file.blob) return file.blob
+  if (file.url?.startsWith('data:image/') || file.source === 'generated') {
+    const response = await fetch(file.url, { signal })
+    return response.blob()
+  }
+}
+
 function tool(name, label, description, properties, required, run) {
   return { label, definition: {
     type: 'function', function: { name, description, parameters: { type: 'object', properties, required, additionalProperties: false } },
@@ -107,11 +128,12 @@ export function fileTools(messages) {
   async function resolve({ file_id, entry }, signal) {
     signal.throwIfAborted()
     const file = files.get(file_id)
-    if (!file) throw new Error('Pièce jointe inconnue. Utilise list_attachments pour retrouver son identifiant.')
+    if (!file) throw new Error('Fichier inconnu. Utilise list_attachments pour retrouver son identifiant.')
     if (entry === undefined) return file
-    if (fileFormat(file) !== 'zip' || !file.blob) throw new Error('Ce fichier n’est pas une archive ZIP disponible.')
+    const blob = fileFormat(file) === 'zip' && await originalBlob(file, signal)
+    if (!blob) throw new Error('Ce fichier n’est pas une archive ZIP disponible.')
     const { extractArchiveEntry } = await import('./archive.js')
-    return extractArchiveEntry(file.blob, whole(entry, 1, Number.MAX_SAFE_INTEGER, 'Numéro d’entrée'), signal)
+    return extractArchiveEntry(blob, whole(entry, 1, Number.MAX_SAFE_INTEGER, 'Numéro d’entrée'), signal)
   }
 
   async function mount(selections, signal) {
@@ -120,8 +142,7 @@ export function fileTools(messages) {
     let size = 0
     for (const selection of selections) {
       const file = await resolve(selection, signal)
-      let blob = file.blob
-      if (!blob && file.url?.startsWith('data:image/')) blob = await fetch(file.url, { signal }).then(result => result.blob())
+      let blob = await originalBlob(file, signal)
       if (!blob && file.text) blob = new Blob([file.text], { type: 'text/plain' })
       if (!blob) throw new Error(`Le fichier original de ${file.name} n’est plus disponible. Joins-le de nouveau.`)
       size += blob.size
@@ -133,7 +154,7 @@ export function fileTools(messages) {
   }
 
   const tools = files.size ? [
-    tool('list_attachments', 'Liste des pièces jointes', 'Liste tous les fichiers de cette discussion, les plus récents en premier. Filtre par nom ou utilise next_offset pour voir la suite.', {
+    tool('list_attachments', 'Liste des fichiers', 'Liste les pièces jointes et les fichiers produits dans les réponses précédentes, les plus récents en premier. Filtre par nom ou utilise next_offset pour voir la suite.', {
       query: { type: 'string' }, offset: offsetField,
     }, [], ({ query = '', offset = 0 }) => {
       whole(offset, 0, Number.MAX_SAFE_INTEGER, 'Décalage')
@@ -150,19 +171,21 @@ export function fileTools(messages) {
       const format = fileFormat(file)
       const name = file.name.slice(0, 180)
       if (!file.blob && file.text) return { name, ...chunkText(file.text, offset), page_count: file.pageCount }
-      if (!file.blob) return { name, note: 'Utilise view_attachment pour examiner cette image ou cette page scannée.' }
+      if (format === 'image' || imageFormats.has(format)) return { name, note: 'Utilise view_attachment pour examiner cette image.' }
+      const blob = await originalBlob(file, signal)
+      if (!blob) return { name, note: 'Utilise view_attachment pour examiner cette image ou cette page scannée.' }
       if (format === 'pdf') {
         const { readPdfPages } = await import('./pdf.js')
         const page = whole(args.page ?? 1, 1, Number.MAX_SAFE_INTEGER, 'Numéro de page')
         const count = whole(args.count ?? (offset ? 1 : 3), 1, 5, 'Nombre de pages')
-        return { name, ...await readPdfPages(file.blob, page, count, offset, signal) }
+        return { name, ...await readPdfPages(blob, page, count, offset, signal) }
       }
       if (format === 'zip') {
         const { listArchive } = await import('./archive.js')
-        return { name, ...await listArchive(file.blob, offset, signal) }
+        return { name, ...await listArchive(blob, offset, signal) }
       }
-      if (format === 'docx' || format === 'xlsx') return { name, ...chunkText(await readOffice(file.blob, format), offset) }
-      if (file.blob.type.startsWith('text/') || textFormats.has(format)) return { name, ...await readPlainText(file.blob, offset) }
+      if (format === 'docx' || format === 'xlsx') return { name, ...chunkText(await readOffice(blob, format), offset) }
+      if (blob.type.startsWith('text/') || textFormats.has(format)) return { name, ...await readPlainText(blob, offset) }
       return { name, note: 'Utilise view_attachment pour une image, ou passe ce fichier à Python pour l’analyser.' }
     }),
     tool('view_attachment', 'Examen visuel d’une page', 'Observe une image ou la page précise d’un PDF. Utile pour les scans, figures, tableaux et mises en page que le texte extrait ne restitue pas. Passe entry pour une image ou un PDF dans un ZIP.', {
@@ -175,7 +198,7 @@ export function fileTools(messages) {
       if (format === 'pdf' && file.blob) {
         const { viewPdfPage } = await import('./pdf.js')
         url = await viewPdfPage(file.blob, page, signal)
-      } else if (file.url) {
+      } else if (file.url && (format === 'image' || imageFormats.has(format))) {
         url = file.url
       } else if (file.blob && (file.blob.type.startsWith('image/') || imageFormats.has(format))) {
         url = await viewImage(file.blob)

@@ -2,12 +2,18 @@ function pythonWorker() {
   const indexURL = 'https://cdn.jsdelivr.net/pyodide/v0.29.3/full/'
   const folder = '/mnt/data'
 
+  function* outputEntries(fs) {
+    for (const directory of [`${folder}/artifacts`, folder]) {
+      if (!fs.analyzePath(directory).exists || !fs.isDir(fs.lstat(directory).mode)) continue
+      for (const name of fs.readdir(directory)) yield { name, path: `${directory}/${name}` }
+    }
+  }
+
   function collectFiles(python) {
     const fs = python.FS
     const files = []
-    for (const name of fs.readdir(folder)) {
-      if (!/\.(png|jpe?g|webp|csv|txt|json)$/i.test(name)) continue
-      const path = `${folder}/${name}`
+    for (const { name, path } of outputEntries(fs)) {
+      if (!/\.(png|jpe?g|webp|csv|txt|json|zip)$/i.test(name) || files.some(file => file.name === name)) continue
       const info = fs.lstat(path)
       if (!fs.isFile(info.mode) || info.size < 1 || info.size > 750000) continue
       const data = fs.readFile(path)
@@ -35,18 +41,19 @@ function pythonWorker() {
       python.setStdin({ stdin: () => lines.shift() ?? null })
       python.FS.mkdirTree(folder)
       python.FS.chdir(folder)
+      python.FS.mkdirTree(`${folder}/artifacts`)
       if (files.length) {
         python.FS.mkdirTree(`${folder}/attachments`)
         for (const { name, blob } of files) {
           python.FS.writeFile(`${folder}/attachments/${name}`, new Uint8Array(await blob.arrayBuffer()))
         }
       }
-      python.runPython('import os; os.environ["MPLBACKEND"] = "Agg"')
+      python.runPython('import os; os.environ["MPLBACKEND"] = "Agg"; os.environ["OCEAN_OUTPUT_DIR"] = "artifacts"')
       await python.loadPackagesFromImports(code)
       const result = await python.runPythonAsync(code)
       if (result !== undefined) append(String(result))
       result?.destroy?.()
-      if (python.loadedPackages.matplotlib && !python.FS.readdir(folder).some(name => /\.png$/i.test(name))) {
+      if (python.loadedPackages.matplotlib && ![...outputEntries(python.FS)].some(({ name }) => /\.png$/i.test(name))) {
         python.runPython(`
 import sys as _ocean_sys
 _ocean_plt = _ocean_sys.modules.get('matplotlib.pyplot')

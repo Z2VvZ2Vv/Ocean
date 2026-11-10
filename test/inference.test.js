@@ -78,11 +78,11 @@ test('une image seule et les résultats des outils repartent directement vers le
   assert.equal(answer.text, 'Quel serait ton premier indice ?')
 })
 
-test('les documents restent disponibles au tour suivant et les scans gardent leur numéro de page', async ({ mock }) => {
+test('les documents et fichiers générés restent accessibles au tour suivant', async ({ mock }) => {
   const scan = 'data:image/jpeg;base64,c2Nhbg=='
   const messages = [
     { role: 'user', text: '', documents: [{ name: 'Cours.pdf', text: 'Page 1\nLa charge est quantifiée.' }] },
-    { role: 'assistant', text: 'Le cours parle de charge.' },
+    { role: 'assistant', text: 'Le cours parle de charge.', artifacts: [{ name: 'graphique.png', url: scan.replace('image/jpeg', 'image/png') }] },
     { role: 'user', text: 'Compare avec ce scan.', documents: [{ name: 'Exercice.pdf', text: '', pageImages: [{ number: 3, url: scan }] }] },
   ]
   let body
@@ -97,6 +97,8 @@ test('les documents restent disponibles au tour suivant et les scans gardent leu
   })
 
   assert.match(body.messages[1].content, /Pièce jointe "Cours.pdf"\nPage 1\nLa charge est quantifiée\./)
+  assert.match(body.messages[2].content, /"graphique\.png" \(id generated-2-1\)/)
+  assert.ok(!body.messages[2].content.includes('c2Nhbg=='))
   assert.deepEqual(body.messages.at(-1).content, [
     { type: 'text', text: 'Compare avec ce scan.' },
     { type: 'text', text: 'Pièce jointe "Exercice.pdf", page 3' },

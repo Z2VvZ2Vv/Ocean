@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Copy, LoaderCircle, Pencil, Play, RotateCcw, Settings2, Square } from 'lucide-react'
 import highlight from 'highlight.js/lib/common'
-import { codeLanguage, codeLimit, inputLimit, programReadsInput, runCode } from './code.js'
+import { codeLanguage, codeLimit, inputLimit, programReadsInput, runCode, sendCodeInput } from './code.js'
 import CodeFiles from './code-files.jsx'
 
 const phases = new Map([
@@ -21,12 +21,21 @@ export default function CodeBlock({ source, language, generating, sandboxEnabled
   const [phase, setPhase] = useState('')
   const [dependencies, setDependencies] = useState('')
   const [result, setResult] = useState(null)
+  const [terminalSession, setTerminalSession] = useState('')
+  const [terminalOutput, setTerminalOutput] = useState('')
+  const [line, setLine] = useState('')
+  const [sending, setSending] = useState(false)
+  const [inputError, setInputError] = useState('')
   const [draft, setDraft] = useState(null)
   const [editing, setEditing] = useState(false)
   const request = useRef(null)
+  const pendingInput = useRef(null)
+  const terminalInput = useRef(null)
   const program = draft ?? source
   const missingInput = !input && programReadsInput(language, program)
   const runnable = Boolean(target && program.trim() && program.length <= codeLimit)
+  const terminalReady = running && terminalSession && phase === 'running'
+  const visibleOutput = terminalOutput || result?.output
 
   useEffect(() => () => request.current?.abort(), [])
 
@@ -39,6 +48,7 @@ export default function CodeBlock({ source, language, generating, sandboxEnabled
     setDraft(value === source ? null : value)
     setCopied(false)
     setResult(null)
+    setTerminalOutput('')
   }
 
   async function copy() {
@@ -48,7 +58,7 @@ export default function CodeBlock({ source, language, generating, sandboxEnabled
     } catch { setCopied(false) }
   }
 
-  async function execute() {
+  async function execute(interactive = false) {
     if (request.current || !runnable) return
     const controller = new AbortController()
     request.current = controller
@@ -56,23 +66,60 @@ export default function CodeBlock({ source, language, generating, sandboxEnabled
     setPhase('')
     setRunning(true)
     setResult(null)
+    setTerminalSession('')
+    setTerminalOutput('')
+    setLine('')
+    setSending(false)
+    setInputError('')
     try {
       const packages = dependencies.split(/[,\s]+/).filter(Boolean)
-      setResult(await runCode({ language, code: program, stdin: input, packages }, sandboxEnabled, controller.signal, setPhase))
+      const terminal = interactive ? {
+        onSession: setTerminalSession,
+        onOutput: text => setTerminalOutput(current => (current + text).slice(-24000)),
+      } : undefined
+      setResult(await runCode({ language, code: program, stdin: interactive ? '' : input, packages },
+        sandboxEnabled, controller.signal, setPhase, terminal))
     } catch (error) {
       setResult({ error: controller.signal.aborted ? 'Exécution arrêtée.' : error.message || 'L’exécution a échoué.' })
     } finally {
       request.current = null
+      setTerminalSession('')
       setRunning(false)
     }
   }
 
   function start() {
     if (missingInput) {
-      setOptionsOpen(true)
+      if (sandboxEnabled) void execute(true)
+      else setOptionsOpen(true)
       return
     }
     void execute()
+  }
+
+  async function submitLine(value) {
+    const controller = request.current
+    if (!controller || !terminalReady || pendingInput.current === controller) return
+    pendingInput.current = controller
+    setSending(true)
+    setInputError('')
+    if (value !== null) setTerminalOutput(current => `${current}${value}\n`.slice(-24000))
+    try {
+      await sendCodeInput(terminalSession, value, controller.signal)
+      if (request.current !== controller) return
+      if (value === null) setTerminalSession('')
+      else {
+        setLine('')
+        terminalInput.current?.focus()
+      }
+    } catch (error) {
+      if (request.current === controller && !controller.signal.aborted) {
+        setInputError(error.message || 'Impossible de confirmer l’envoi de la saisie.')
+      }
+    } finally {
+      if (pendingInput.current === controller) pendingInput.current = null
+      if (request.current === controller) setSending(false)
+    }
   }
 
   return <div className="code-block">
@@ -104,22 +151,34 @@ export default function CodeBlock({ source, language, generating, sandboxEnabled
       event.preventDefault()
       if (!missingInput) void execute()
     }}>
-      <label>Valeurs à fournir au programme<textarea autoFocus value={input} maxLength={inputLimit} rows={2}
+      <label>Valeurs préparées à l’avance<textarea autoFocus value={input} maxLength={inputLimit} rows={2}
+        placeholder="Une valeur par ligne, selon le programme"
         onChange={event => setInput(event.target.value)} /></label>
       {target.id === 'python' && sandboxEnabled && <label>Paquets PyPI à installer
         <input value={dependencies} maxLength={680} placeholder="numpy, scikit-learn" onChange={event => setDependencies(event.target.value)} />
       </label>}
       <div className="code-input-actions">
         <button className="secondary-button" type="button" onClick={() => setOptionsOpen(false)}>Annuler</button>
-        {missingInput && <button className="secondary-button" type="button" disabled={!runnable} onClick={execute}>Lancer sans entrée</button>}
+        {sandboxEnabled && <button className="secondary-button" type="button" disabled={!runnable} onClick={() => execute(true)}>Lancer en direct</button>}
+        {missingInput && <button className="secondary-button" type="button" disabled={!runnable} onClick={() => execute()}>Lancer sans entrée</button>}
         <button className="primary-button" type="submit" disabled={!runnable || missingInput}>Lancer</button>
       </div>
     </form>}
     {(running || result) && <div className="code-result" aria-live="polite">
-      {running && <div className="generation-status" role="status"><LoaderCircle className="spinner" size={15} /> {phases.get(phase) || 'Exécution en cours…'}</div>}
+      {running && !terminalReady && <div className="generation-status" role="status"><LoaderCircle className="spinner" size={15} /> {phases.get(phase) || 'Exécution en cours…'}</div>}
       {result?.error && <p className="error">{result.error}</p>}
-      {result?.output && <pre aria-label="Sortie du programme">{result.output}</pre>}
-      {result && !result.output && !result.error && !result.artifacts?.length && <p className="small">Exécution terminée, sans sortie.</p>}
+      {visibleOutput && <pre aria-label="Sortie du programme">{visibleOutput}</pre>}
+      {terminalReady && <form className="code-terminal" onSubmit={event => {
+        event.preventDefault()
+        void submitLine(line)
+      }}>
+        <input ref={terminalInput} aria-label="Réponse au programme" autoFocus autoComplete="off" placeholder="Ta réponse au programme"
+          maxLength={inputLimit} readOnly={sending} value={line} onChange={event => setLine(event.target.value)} />
+        <button type="submit" className="primary-button" disabled={sending}>Envoyer</button>
+        <button type="button" className="secondary-button" disabled={sending} onClick={() => submitLine(null)}>Fin de saisie</button>
+      </form>}
+      {terminalReady && inputError && <p className="error">{inputError}</p>}
+      {result && !visibleOutput && !result.error && !result.artifacts?.length && <p className="small">Exécution terminée, sans sortie.</p>}
       <CodeFiles files={result?.artifacts} />
     </div>}
   </div>

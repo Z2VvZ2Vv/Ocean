@@ -99,6 +99,23 @@ export async function currentUser(req) {
   }
 }
 
+export function signCodeSession(userId, execution) {
+  return new SignJWT(execution).setProtectedHeader({ alg: 'HS256' })
+    .setIssuer('ocean-code').setAudience('ocean-stdin').setSubject(userId)
+    .setExpirationTime('70s').sign(secret())
+}
+
+export async function verifyCodeSession(userId, token) {
+  const { payload } = await jwtVerify(token, secret(), {
+    issuer: 'ocean-code', audience: 'ocean-stdin', subject: userId, algorithms: ['HS256'], requiredClaims: ['exp'],
+  })
+  const { name, sessionId, commandId } = payload
+  if (![name, sessionId, commandId].every(value => typeof value === 'string' && value.length > 0)) {
+    throw new Error('Session de code invalide.')
+  }
+  return { name, sessionId, commandId }
+}
+
 export function endSession(req, res) {
   res.setHeader('Set-Cookie', [cookie(req, sessionCookie, '', 0), cookie(req, nonceCookie, '', 0)])
 }

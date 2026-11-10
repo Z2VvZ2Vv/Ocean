@@ -20,9 +20,10 @@ export function chatTools(searchEnabled, sandboxEnabled, messages = []) {
       function: {
         name: 'python',
         description: (sandboxEnabled
-          ? 'Exécute du Python 3 isolé. Pour des bibliothèques PyPI hors du navigateur, renseigne packages avec leurs noms de distribution et enregistre les fichiers dans artifacts/. Sinon, utilise Matplotlib ou écris les fichiers dans le dossier courant. Utilise print pour les résultats texte.'
-          : 'Exécute du Python 3 isolé dans le navigateur. Utilise print pour les résultats texte. Pour produire un graphique ou un fichier, utilise Matplotlib ou écris un PNG, CSV, TXT ou JSON dans le dossier courant.')
-          + (attachments.hasFiles ? ' Sélectionne les pièces jointes dans files pour les monter dans attachments/. Utilise os.listdir("attachments") pour obtenir leurs noms. Python peut traiter une archive avec zipfile.' : ''),
+          ? 'Exécute du Python 3 isolé. Pour des bibliothèques PyPI hors du navigateur, renseigne packages avec leurs noms de distribution.'
+          : 'Exécute du Python 3 isolé dans le navigateur.')
+          + ' Utilise print pour les résultats texte, Matplotlib pour un graphique et artifacts/ pour écrire les fichiers à télécharger (PNG, JPEG, WebP, CSV, TXT, JSON, ZIP).'
+          + (attachments.hasFiles ? ' Sélectionne les pièces jointes et les fichiers déjà produits dans files via leur file_id. Ils sont montés sous des noms numérotés dans attachments/. Utilise os.listdir("attachments") pour les trouver. Pour créer un ZIP avec zipfile, utilise le fichier monté et donne son nom d’origine en arcname.' : ''),
         parameters: {
           type: 'object', properties: {
             code: { type: 'string' }, stdin: { type: 'string' },
@@ -44,7 +45,7 @@ export function chatTools(searchEnabled, sandboxEnabled, messages = []) {
       function: {
         name: 'run_code',
         description: sandboxEnabled
-          ? 'Compile ou exécute un programme complet. Donne le code et, si nécessaire, son entrée standard. Écris les fichiers PNG, CSV, TXT ou JSON à transmettre dans le dossier artifacts/. Pour Java, utilise une classe Main.'
+          ? 'Compile ou exécute un programme complet. Donne le code et, si nécessaire, son entrée standard. Écris les fichiers PNG, CSV, TXT, JSON ou ZIP à transmettre dans le dossier artifacts/. Pour Java, utilise une classe Main.'
           : 'Exécute du JavaScript dans le navigateur, sans Node.js. Utilise console.log pour renvoyer le résultat et readLine() pour lire une ligne de stdin.',
         parameters: {
           type: 'object', properties: {

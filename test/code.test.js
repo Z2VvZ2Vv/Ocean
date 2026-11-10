@@ -13,13 +13,17 @@ test('une dépendance Python part dans la sandbox et les fichiers reviennent au 
     })
     return Response.json({ artifacts: [
       { name: 'tracé.png', data: 'cG5n' },
+      { name: 'archive.zip', data: 'emlw' },
       { name: '../fichier.html', data: 'aHRtbA==' },
     ] })
   })
   const signal = new AbortController().signal
   const result = await runCode({ language: 'py', code: 'import seaborn', packages: ['seaborn'],
     files: [{ name: '1-table.csv', blob: new Blob(['42']) }] }, true, signal)
-  assert.deepEqual(result.artifacts, [{ name: 'tracé.png', mime: 'image/png', url: 'data:image/png;base64,cG5n' }])
+  assert.deepEqual(result.artifacts, [
+    { name: 'tracé.png', mime: 'image/png', url: 'data:image/png;base64,cG5n' },
+    { name: 'archive.zip', mime: 'application/zip', url: 'data:application/zip;base64,emlw' },
+  ])
   await assert.rejects(runCode({ language: 'python', code: 'print(1)', packages: ['https://example.org/fichier.whl'] }, true, signal), /paquets PyPI/)
 })
 
@@ -29,8 +33,8 @@ test('les paquets sont installés avant l’envoi du code et la sandbox est supp
   const progress = []
   const attachedFile = { path: 'attachments/1-table.csv', content: Buffer.from('42') }
   const files = new Map([
-    ['.ocean-output', '42\n'], ['.ocean-files', 'artifacts/table.csv\0artifacts/../secret.csv\0./plot.png\0'],
-    ['artifacts/table.csv', 'n\n42\n'], ['./plot.png', 'png'],
+    ['.ocean-output', '42\n'], ['.ocean-files', 'artifacts/table.csv\0artifacts/../secret.csv\0./plot.png\0artifacts/plot.zip\0'],
+    ['artifacts/table.csv', 'n\n42\n'], ['./plot.png', 'png'], ['artifacts/plot.zip', 'zip'],
   ])
   const sandbox = {
     async runCommand({ cmd, args }) {
@@ -62,7 +66,7 @@ test('les paquets sont installés avant l’envoi du code et la sandbox est supp
   assert.deepEqual(order, ['python3', 'verrouillage', 'mkdir', 'programme', 'bash', 'bash', 'suppression'])
   assert.deepEqual(progress, ['opening', 'setup', 'running', 'reading'])
   assert.equal(result.output, '42\n')
-  assert.deepEqual(result.artifacts.map(file => file.name), ['table.csv', 'plot.png'])
+  assert.deepEqual(result.artifacts.map(file => file.name), ['table.csv', 'plot.png', 'plot.zip'])
 })
 
 test('le client affiche les étapes de compilation et accepte un résultat découpé en plusieurs fragments', async ({ mock }) => {
