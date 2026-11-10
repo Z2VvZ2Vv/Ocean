@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import { pastedImages } from './clipboard.js'
 import { readAttachments } from './attachments.js'
+import FilePreviewTrigger from './file-preview-trigger.jsx'
+import { formatFileSize } from './preview-data.js'
 import { apiBase, effortLevels, listModels, modelName } from './inference.js'
 
 export function Brand() {
@@ -67,12 +69,15 @@ export function Sidebar({ user, open, toggle, chats, activeId, onNew, onOpen, on
 
 export function FileChip({ file, onRemove }) {
   const pages = file.pageCount === 1 ? ' · 1 page' : file.pageCount ? ` · ${file.pageCount} pages` : ''
+  const size = formatFileSize(file.size ?? file.blob?.size)
   return <div className="file-chip" title={file.name}>
-    <span className="file-symbol"><FileText size={19} /></span>
-    <span className="file-label">
-      <strong>{file.name}</strong>
-      <small>{file.format}{pages}{file.pageImages?.length ? ' · Vision' : ''}</small>
-    </span>
+    <FilePreviewTrigger file={file} className="file-chip-trigger">
+      <span className="file-symbol"><FileText size={19} /></span>
+      <span className="file-label">
+        <strong>{file.name}</strong>
+        <small>{file.format}{pages}{size ? ` · ${size}` : ''}</small>
+      </span>
+    </FilePreviewTrigger>
     {onRemove && <IconButton label={`Retirer ${file.name}`} onClick={onRemove}><X size={15} /></IconButton>}
   </div>
 }
@@ -132,7 +137,7 @@ export function Composer({
       }} />
     {(hasAttachments || reading) && <div className="draft-attachments">
       {images.map(image => <div className="draft-image" key={image.id}>
-        <img src={image.url} alt={image.name} />
+        <FilePreviewTrigger file={image} className="draft-image-trigger"><img src={image.url} alt={image.name} /></FilePreviewTrigger>
         <IconButton label={`Retirer ${image.name}`} disabled={reading} onClick={() => remove('images', image.id)}><X size={14} /></IconButton>
       </div>)}
       {documents.map(file => <FileChip key={file.id} file={file} onRemove={reading ? undefined : () => remove('documents', file.id)} />)}

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { Readable } from 'node:stream'
 import test from 'node:test'
 import { runSandboxCode } from '../server/sandbox.js'
-import { runCode } from '../src/code.js'
+import { artifactBytes, artifactFromBytes, runCode } from '../src/code.js'
 
 test('une dépendance Python part dans la sandbox et les fichiers reviennent au navigateur', async ({ mock }) => {
   mock.method(globalThis, 'fetch', async (url, options) => {
@@ -32,9 +32,12 @@ test('les paquets sont installés avant l’envoi du code et la sandbox est supp
   const order = []
   const progress = []
   const attachedFile = { path: 'attachments/1-table.csv', content: Buffer.from('42') }
+  const listing = ['artifacts/table.xlsx', 'artifacts/../secret.csv', 'artifacts/vide.docx', 'artifacts/rapport.pdf',
+    './table.xlsx', './plot.png', 'artifacts/plot.zip', './présentation.pptx', ''].join('\0')
   const files = new Map([
-    ['.ocean-output', '42\n'], ['.ocean-files', 'artifacts/table.csv\0artifacts/../secret.csv\0./plot.png\0artifacts/plot.zip\0'],
-    ['artifacts/table.csv', 'n\n42\n'], ['./plot.png', 'png'], ['artifacts/plot.zip', 'zip'],
+    ['.ocean-output', '42\n'], ['.ocean-files', listing],
+    ['artifacts/table.xlsx', 'xlsx'], ['artifacts/vide.docx', ''], ['artifacts/rapport.pdf', Buffer.alloc(artifactBytes + 1)],
+    ['./plot.png', 'png'], ['artifacts/plot.zip', 'zip'],
   ])
   const sandbox = {
     async runCommand({ cmd, args }) {
@@ -66,7 +69,32 @@ test('les paquets sont installés avant l’envoi du code et la sandbox est supp
   assert.deepEqual(order, ['python3', 'verrouillage', 'mkdir', 'programme', 'bash', 'bash', 'suppression'])
   assert.deepEqual(progress, ['opening', 'setup', 'running', 'reading'])
   assert.equal(result.output, '42\n')
-  assert.deepEqual(result.artifacts.map(file => file.name), ['table.csv', 'plot.png', 'plot.zip'])
+  assert.deepEqual(result.artifacts.map(file => file.name), ['table.xlsx', 'plot.png', 'plot.zip'])
+  assert.deepEqual(result.artifactIssues, [
+    { name: 'vide.docx', reason: 'empty' }, { name: 'rapport.pdf', reason: 'oversized' }, { name: 'présentation.pptx', reason: 'count' },
+  ])
+})
+
+test('les documents générés conservent leur type MIME et les limites de téléchargement', async ({ mock }) => {
+  const bytes = Buffer.from('fixture')
+  const names = ['rapport.PDF', 'résumé.docx', 'mesures.xlsx']
+  mock.method(globalThis, 'fetch', async () => Response.json({
+    artifacts: [
+      { name: 'rapport.PDF', data: 'invalid_base64' },
+      { name: 'script.html', data: bytes.toString('base64') },
+      ...names.map(name => ({ name, data: bytes.toString('base64') })),
+    ],
+    artifactIssues: [{ name: 'trop-grand.pdf', reason: 'oversized' }],
+  }))
+  const result = await runCode({ language: 'python', code: 'print(1)', packages: ['reportlab'] }, true, new AbortController().signal)
+  assert.deepEqual(result.artifacts, names.map(name => artifactFromBytes(name, bytes)))
+  assert.deepEqual(result.artifacts.map(file => file.mime), [
+    'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ])
+  assert.deepEqual(result.artifactWarnings, ['Le fichier « trop-grand.pdf » dépasse la limite de 750 ko.'])
+  assert.throws(() => artifactFromBytes('script.html', bytes), /format de fichier invalide/)
+  assert.throws(() => artifactFromBytes('rapport.pdf', Buffer.alloc(artifactBytes + 1)), /limite de 750 ko/)
 })
 
 test('le client affiche les étapes de compilation et accepte un résultat découpé en plusieurs fragments', async ({ mock }) => {

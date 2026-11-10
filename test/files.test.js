@@ -3,6 +3,7 @@ import test from 'node:test'
 import { BlobReader, BlobWriter, TextReader, ZipWriter } from '@zip.js/zip.js'
 import { readAttachments } from '../src/attachments.js'
 import { fileTools } from '../src/file-tools.js'
+import { readTextChunk } from '../src/document-text.js'
 
 test('les fichiers au-delà des anciennes limites sont conservés et le catalogue est paginé', async () => {
   const signal = new AbortController().signal
@@ -62,4 +63,15 @@ test('une réponse suivante peut archiver les octets du graphique déjà affich�
   assert.equal(archive.entries[0].name, name)
   const [extracted] = await next.mount([{ file_id: 'generated-4-1', entry: 1 }], signal)
   assert.deepEqual(Buffer.from(await extracted.blob.arrayBuffer()), bytes)
+})
+
+test('la lecture par octets conserve les caractères UTF-16 entre deux extraits', async () => {
+  const signal = new AbortController().signal
+  const text = 'a'.repeat(5998) + '🐬 Ocean'
+  const blob = new Blob([Buffer.from('\uFEFF' + text, 'utf16le')])
+  const first = await readTextChunk(blob, 0, signal)
+  assert.equal(first.next_offset, 11998)
+  const last = await readTextChunk(blob, first.next_offset, signal)
+  assert.equal(first.text + last.text, text)
+  assert.equal(last.next_offset, undefined)
 })

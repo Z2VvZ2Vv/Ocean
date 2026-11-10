@@ -7,6 +7,7 @@ import { Composer, FileChip, IconButton, Modal, ModelControl, Setup, Sidebar } f
 import { defaultSettings, getEffortLevel, runChat } from './inference.js'
 import { chatTools } from './tools.js'
 import CodeFiles from './code-files.jsx'
+import FilePreviewTrigger from './file-preview-trigger.jsx'
 import { deleteChat, loadWorkspace, saveChat, saveSettings } from './storage.js'
 
 const Markdown = lazy(() => import('./markdown.jsx'))
@@ -24,6 +25,21 @@ function CopyAction({ label, text }) {
   }
 
   return <IconButton label={copied ? 'Copié' : label} onClick={copy}>{copied ? <Check size={19} /> : <Copy size={19} />}</IconButton>
+}
+
+function GenerationStatus({ progress }) {
+  const [elapsed, setElapsed] = useState(0)
+  const { label, startedAt } = progress
+  useEffect(() => {
+    const timer = setInterval(() => setElapsed(Math.floor((performance.now() - startedAt) / 1000)), 1000)
+    return () => clearInterval(timer)
+  }, [startedAt])
+  const duration = elapsed < 60 ? `${elapsed} s` : `${Math.floor(elapsed / 60)} min ${elapsed % 60} s`
+  return <div className="generation-status" role="status">
+    <LoaderCircle className="spinner" size={16} aria-hidden="true" />
+    <span className="generation-label">{label}…</span>
+    {elapsed >= 2 && <span className="generation-elapsed" aria-hidden="true">{duration}</span>}
+  </div>
 }
 
 function Answer({ message, generating, progress, onRate, onRegenerate, menu, setMenu, sandboxEnabled, theme }) {
@@ -51,7 +67,11 @@ function Answer({ message, generating, progress, onRate, onRegenerate, menu, set
   return <article className="answer" data-learning={message.learning || undefined}>
     <div className="answer-mark"><img src="/ocean.svg" alt="Ocean" /></div>
     <div className="answer-body">
-      {generating && <div className="generation-status" role="status"><LoaderCircle className="spinner" size={16} /> {progress}</div>}
+      {generating && <GenerationStatus progress={progress} />}
+      {!!message.activity?.length && <details className="answer-activity">
+        <summary>Activité <ChevronDown size={14} /></summary>
+        <ol>{message.activity.map((step, index) => <li key={index}>{step}</li>)}</ol>
+      </details>}
       {message.reasoning && <details className="reflection">
         <summary>Réflexion <ChevronDown size={14} /></summary>
         <p>{message.reasoning}</p>
@@ -87,7 +107,9 @@ function UserMessage({ message, onEdit }) {
   const [draft, setDraft] = useState(null)
   return <article className="user-message" aria-label="Ton message">
     {!!message.images?.length && <div className="user-images">
-      {message.images.map(image => <img key={image.id} src={image.url} alt={image.name} />)}
+      {message.images.map(image => <FilePreviewTrigger key={image.id} file={image} className="image-preview-trigger">
+        <img src={image.url} alt={image.name} />
+      </FilePreviewTrigger>)}
     </div>}
     {!!message.documents?.length && <div className="user-files">
       {message.documents.map(file => <FileChip key={file.id} file={file} />)}
@@ -134,7 +156,7 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(null)
   const [live, setLive] = useState(null)
-  const [progress, setProgress] = useState('')
+  const [progress, setProgress] = useState(null)
   const request = useRef(null)
   const attachmentRead = useRef(null)
   const transcript = useRef(null)
@@ -257,10 +279,10 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
     const controller = new AbortController()
     request.current = controller
     follow.current = true
-    const blank = { id: crypto.randomUUID(), role: 'assistant', text: '', reasoning: '', learning: Boolean(chat.learning) }
+    const blank = { id: crypto.randomUUID(), role: 'assistant', text: '', reasoning: '', activity: [], learning: Boolean(chat.learning) }
     let latest = blank
     setLive(blank)
-    setProgress('Ocean réfléchit…')
+    setProgress({ label: 'Préparation de la demande', startedAt: performance.now() })
     setError('')
     setRetry(null)
     try {
@@ -268,15 +290,21 @@ export function Workspace({ user, searchEnabled, sandboxEnabled, onSignOut, them
         config: settings, messages: chat.messages, learning: chat.learning,
         tools: chatTools(searchEnabled, sandboxEnabled, chat.messages), signal: controller.signal,
         onUpdate: update => {
-          latest = { ...blank, ...update, reasoning: chat.learning ? '' : update.reasoning }
+          latest = { ...latest, ...update, reasoning: chat.learning ? '' : update.reasoning }
           setLive(latest)
         },
-        onTool: tool => setProgress(`${tool}…`),
+        onProgress: (label, record) => {
+          setProgress(current => current.label === label ? current : { ...current, label })
+          if (!record || latest.activity.at(-1) === label) return
+          latest = { ...latest, activity: [...latest.activity, label].slice(-12) }
+          setLive(latest)
+        },
       })
-      storeChat({ ...chat, messages: [...chat.messages, { ...blank, ...response, reasoning: chat.learning ? '' : response.reasoning }], updatedAt: Date.now() })
+      storeChat({ ...chat, messages: [...chat.messages, { ...latest, ...response, reasoning: chat.learning ? '' : response.reasoning }], updatedAt: Date.now() })
     } catch (problem) {
-      if (previousChat) storeChat(previousChat)
-      else if (latest.text.trim()) storeChat({ ...chat, messages: [...chat.messages, latest], updatedAt: Date.now() })
+      if (latest.artifacts?.length || (!previousChat && (latest.text.trim() || latest.activity.length))) {
+        storeChat({ ...chat, messages: [...chat.messages, latest], updatedAt: Date.now() })
+      } else if (previousChat) storeChat(previousChat)
       if (!controller.signal.aborted) setError(problem.message || 'La génération a échoué.')
       setRetry(chat)
     } finally {

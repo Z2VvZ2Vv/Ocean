@@ -1,14 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Copy, LoaderCircle, Pencil, Play, RotateCcw, Settings2, Square } from 'lucide-react'
 import highlight from 'highlight.js/lib/common'
-import { codeLanguage, codeLimit, inputLimit, programReadsInput, runCode, sendCodeInput } from './code.js'
+import { codeLanguage, codeLimit, codePhases, inputLimit, programReadsInput, runCode, sendCodeInput } from './code.js'
 import CodeFiles from './code-files.jsx'
-
-const phases = new Map([
-  ['browser', 'Exécution dans le navigateur…'], ['opening', 'Démarrage de la sandbox…'],
-  ['setup', 'Préparation de l’environnement…'], ['compiling', 'Compilation…'],
-  ['running', 'Exécution du programme…'], ['reading', 'Récupération du résultat…'],
-])
 
 export default function CodeBlock({ source, language, generating, sandboxEnabled }) {
   const target = codeLanguage(language)
@@ -165,8 +159,11 @@ export default function CodeBlock({ source, language, generating, sandboxEnabled
       </div>
     </form>}
     {(running || result) && <div className="code-result" aria-live="polite">
-      {running && !terminalReady && <div className="generation-status" role="status"><LoaderCircle className="spinner" size={15} /> {phases.get(phase) || 'Exécution en cours…'}</div>}
+      {running && !terminalReady && <div className="generation-status" role="status"><LoaderCircle className="spinner" size={15} /> {codePhases.get(phase) || 'Exécution en cours'}…</div>}
       {result?.error && <p className="error">{result.error}</p>}
+      {!!result?.artifactWarnings?.length && <ul className="artifact-warnings small">
+        {result.artifactWarnings.map((warning, index) => <li key={index}>{warning}</li>)}
+      </ul>}
       {visibleOutput && <pre aria-label="Sortie du programme">{visibleOutput}</pre>}
       {terminalReady && <form className="code-terminal" onSubmit={event => {
         event.preventDefault()

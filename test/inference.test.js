@@ -41,27 +41,33 @@ test('une image seule et les résultats des outils repartent directement vers le
     const body = JSON.parse(options.body)
     calls.push(body)
     if (calls.length === 1) return stream(
+      { delta: { reasoning_content: 'Je prépare le calcul.' } },
       { delta: { tool_calls: [{ index: 0, id: 'calc', function: { name: 'python', arguments: '{"co' } }] } },
       { delta: { tool_calls: [{ index: 0, function: { arguments: 'de":"print(2*3)"}' } }] }, finish_reason: 'tool_calls' },
     )
+    assert.deepEqual(updates.at(-1).artifacts, [{ name: 'calcul.png', mime: 'image/png', url: image }])
     return stream(
       { delta: { content: '<thi' } },
-      { delta: { content: 'nk>Vérification</think> Quel serait ton premier indice ?' }, finish_reason: 'stop' },
+      { delta: { content: 'nk>Vérification' } },
+      { delta: { content: '</think> Quel serait ton premier indice ?' }, finish_reason: 'stop' },
     )
   })
 
   const updates = []
+  const progress = []
   const answer = await runChat({
     config: { ...defaultSettings, endpoint: 'https://model.ts.net/v1', effort: 'xhigh' },
     messages: [{ role: 'user', text: '', images: [{ url: image }] }],
     learning: true,
     signal: new AbortController().signal,
-    onTool: () => {},
+    onProgress: (label, record) => progress.push([label, Boolean(record)]),
     onUpdate: update => updates.push(update),
     tools: [{
+      label: 'Exécution de Python',
       definition: { type: 'function', function: { name: 'python' } },
-      run: async args => {
+      run: async (args, _signal, onProgress) => {
         assert.deepEqual(args, { code: 'print(2*3)' })
+        onProgress('Exécution dans le navigateur')
         return { output: '6', artifacts: [{ name: 'calcul.png', mime: 'image/png', url: image }] }
       },
     }],
@@ -76,6 +82,18 @@ test('une image seule et les résultats des outils repartent directement vers le
   assert.ok(updates.every(update => !update.text.includes('<think') && !update.text.includes('<thi')))
   assert.equal(answer.reasoning, 'Vérification')
   assert.equal(answer.text, 'Quel serait ton premier indice ?')
+  assert.deepEqual(progress, [
+    ['Envoi de la demande au modèle', false],
+    ['En attente des premières données du modèle', false],
+    ['Le modèle analyse la demande', false],
+    ['Préparation de l’outil · Exécution de Python', false],
+    ['Exécution de Python', true],
+    ['Exécution de Python · Exécution dans le navigateur', false],
+    ['Envoi des résultats des outils au modèle', false],
+    ['En attente des premières données du modèle', false],
+    ['Le modèle analyse les résultats des outils', false],
+    ['Rédaction de la réponse', false],
+  ])
 })
 
 test('les documents et fichiers générés restent accessibles au tour suivant', async ({ mock }) => {
@@ -93,7 +111,7 @@ test('les documents et fichiers générés restent accessibles au tour suivant',
 
   await runChat({
     config: defaultSettings, messages, tools: [], signal: new AbortController().signal,
-    onTool: () => {}, onUpdate: () => {},
+    onUpdate: () => {},
   })
 
   assert.match(body.messages[1].content, /Pièce jointe "Cours.pdf"\nPage 1\nLa charge est quantifiée\./)
@@ -106,13 +124,39 @@ test('les documents et fichiers générés restent accessibles au tour suivant',
   ])
 })
 
+test('les petits fichiers texte entrent dans la première requête et les gros restent dans le catalogue', async ({ mock }) => {
+  let body
+  const activity = []
+  mock.method(globalThis, 'fetch', async (_url, options) => {
+    body = JSON.parse(options.body)
+    return stream({ delta: { content: 'Total calculé.' }, finish_reason: 'stop' })
+  })
+  const documents = [
+    { id: 'petit', name: 'ventes.csv', blob: new Blob(['\uFEFFarticle;quantité\nÉcran;42'], { type: 'text/csv' }) },
+    { id: 'grand', name: 'journal.txt', blob: new Blob(['Donnée volumineuse '.repeat(6000)]) },
+  ]
+  await runChat({
+    config: defaultSettings, messages: [{ role: 'user', text: 'Calcule le total.', documents }], tools: [],
+    signal: new AbortController().signal, onUpdate: () => {},
+    onProgress: (label, record) => { if (record) activity.push(label) },
+  })
+  const prompt = body.messages.at(-1).content
+  assert.ok(prompt.startsWith('Calcule le total.'))
+  const excerpt = JSON.parse(prompt.split('\n').find(line => line.startsWith('{"name":')))
+  assert.deepEqual(excerpt, { name: 'ventes.csv', id: 'petit', text: 'article;quantité\nÉcran;42' })
+  assert.match(prompt, /journal\.txt/)
+  assert.doesNotMatch(prompt, /Donnée volumineuse/)
+  assert.match(body.messages[0].content, /données de référence/)
+  assert.deepEqual(activity, ['Lecture de « ventes.csv »'])
+})
+
 test('la réflexion utilise uniquement low, medium et xhigh dès la première requête', async ({ mock }) => {
   const efforts = []
   mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(url, `${defaultSettings.endpoint}/chat/completions`)
     const body = JSON.parse(options.body)
     efforts.push(body.reasoning_effort)
-    assert.equal(body.chat_template_kwargs.enable_thinking, true)
+    assert.equal(body.chat_template_kwargs.enable_thinking, body.reasoning_effort !== 'low')
     return stream({ delta: { content: 'Réponse' }, finish_reason: 'stop' })
   })
 
@@ -120,7 +164,7 @@ test('la réflexion utilise uniquement low, medium et xhigh dès la première re
     await runChat({
       config: { ...defaultSettings, effort },
       messages: [{ role: 'user', text: 'Bonjour' }], tools: [], signal: new AbortController().signal,
-      onTool: () => {}, onUpdate: () => {},
+      onUpdate: () => {},
     })
   }
 
@@ -138,7 +182,7 @@ test('une page de PDF devient une image vision après la réponse texte de l’o
 
   await runChat({ config: defaultSettings, messages: [{ role: 'user', text: 'Observe la page 3.', documents: [
     { id: 'pdf', name: 'cours.pdf', format: 'PDF', blob: new Blob(['PDF local uniquement']) },
-  ] }], signal: new AbortController().signal, onTool: () => {}, onUpdate: () => {}, tools: [{
+  ] }], signal: new AbortController().signal, onUpdate: () => {}, tools: [{
     definition: { type: 'function', function: { name: 'view_attachment' } },
     run: async () => ({ image: 'cours.pdf — page 3', images: [{ label: 'cours.pdf — page 3', url: image }] }),
   }] })
@@ -152,4 +196,64 @@ test('une page de PDF devient une image vision après la réponse texte de l’o
       { type: 'image_url', image_url: { url: image } },
     ] },
   ])
+})
+
+test('le délai de génération repart à chaque bloc reçu du flux', async ({ mock }) => {
+  mock.timers.enable({ apis: ['setTimeout'] })
+  const encoder = new TextEncoder()
+  const first = Promise.withResolvers()
+  const second = Promise.withResolvers()
+  let streamController
+  let requestSignal
+  function send(content, finish_reason = null) {
+    const choice = { delta: { content }, finish_reason }
+    streamController.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [choice] })}\n\n`))
+  }
+  mock.method(globalThis, 'fetch', async (_url, { signal }) => {
+    requestSignal = signal
+    return new Response(new ReadableStream({
+      start(controller) {
+        streamController = controller
+        signal.addEventListener('abort', () => controller.error(signal.reason), { once: true })
+        send('Début')
+      },
+    }), { headers: { 'Content-Type': 'text/event-stream' } })
+  })
+
+  const answer = runChat({
+    config: defaultSettings, messages: [{ role: 'user', text: 'Explique le TP.' }], tools: [],
+    signal: new AbortController().signal, onUpdate: ({ text }) => {
+      if (text === 'Début') first.resolve()
+      if (text === 'Début et suite') second.resolve()
+    },
+  })
+  await first.promise
+  mock.timers.tick(240000)
+  send(' et suite')
+  await second.promise
+  mock.timers.tick(240000)
+  assert.equal(requestSignal.aborted, false)
+  send('.', 'stop')
+  streamController.close()
+  assert.equal((await answer).text, 'Début et suite.')
+})
+
+test('un flux interrompu par cinq minutes de silence renvoie une erreur lisible', async ({ mock }) => {
+  mock.timers.enable({ apis: ['setTimeout'] })
+  const connected = Promise.withResolvers()
+  mock.method(globalThis, 'fetch', async (_url, { signal }) => new Response(new ReadableStream({
+    start(controller) {
+      signal.addEventListener('abort', () => controller.error(signal.reason), { once: true })
+      connected.resolve()
+    },
+  }), { headers: { 'Content-Type': 'text/event-stream' } }))
+
+  const answer = runChat({
+    config: defaultSettings, messages: [{ role: 'user', text: 'Explique le TP.' }], tools: [],
+    signal: new AbortController().signal, onUpdate: () => {},
+  })
+  const rejected = assert.rejects(answer, /n’a envoyé aucune donnée depuis cinq minutes/)
+  await connected.promise
+  mock.timers.tick(300000)
+  await rejected
 })

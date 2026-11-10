@@ -105,19 +105,27 @@ async function collectArtifacts(sandbox, language, signal) {
     cmd: 'bash', args: ['-c', 'find "$@" -maxdepth 1 -type f -print0 | head -c 16384 > .ocean-files', 'ocean', ...folders],
     timeoutMs: 2000, signal,
   })
-  if (listing.exitCode !== 0) return []
+  if (listing.exitCode !== 0) return { artifacts: [] }
   const { bytes } = await readBounded(sandbox, '.ocean-files', 16384, signal)
-  const paths = bytes.toString('utf8').split('\0').filter(path => {
+  const paths = bytes.toString('utf8').split('\0').slice(0, -1).filter(path => {
     const [directory, name, ...rest] = path.split('/')
     return folders.includes(directory) && !rest.length && artifactType(name)
   })
-  const files = []
+  const artifacts = []
+  const artifactIssues = []
   for (const path of paths.slice(0, 12)) {
+    const name = path.split('/')[1]
+    if (artifacts.some(file => file.name === name)) continue
+    if (artifacts.length === artifactLimit) {
+      if (artifactIssues.length === artifactLimit) break
+      artifactIssues.push({ name, reason: 'count' })
+      continue
+    }
     const file = await readBounded(sandbox, path, artifactBytes, signal)
-    if (!file.truncated && file.bytes.length) files.push({ name: path.split('/')[1], data: file.bytes.toString('base64') })
-    if (files.length === artifactLimit) break
+    if (!file.truncated && file.bytes.length) artifacts.push({ name, data: file.bytes.toString('base64') })
+    else if (artifactIssues.length < artifactLimit) artifactIssues.push({ name, reason: file.truncated ? 'oversized' : 'empty' })
   }
-  return files
+  return { artifacts, ...(artifactIssues.length && { artifactIssues }) }
 }
 
 export async function runSandboxCode({ language, code, stdin, packages = [], files = [], interactive = false }, signal, {
@@ -172,12 +180,12 @@ export async function runSandboxCode({ language, code, stdin, packages = [], fil
     const run = interactive ? await runTerminal(sandbox, command, { signal, onSession, onOutput })
       : await stage(sandbox, ['timeout', '--kill-after=1s', '8s', ...command], '.ocean-stdin', '.ocean-output', { timeoutMs: 10000, fileLimit: 2048, signal })
     onProgress('reading')
-    const artifacts = await collectArtifacts(sandbox, language, signal)
+    const filesProduced = await collectArtifacts(sandbox, language, signal)
     const output = [build?.output, run.output].filter(Boolean).join('\n').slice(0, 12000)
     const error = run.exitCode === 124 ? `Le programme a dépassé la limite de ${interactive ? 60 : 8} secondes.`
       : run.exitCode === null || run.exitCode === 137 ? 'L’exécution a été interrompue.'
       : run.exitCode !== 0 ? `Le programme s’est arrêté (code ${run.exitCode}).` : ''
-    return { output, artifacts, ...(error && { error }) }
+    return { output, ...filesProduced, ...(error && { error }) }
   } finally {
     await sandbox.delete({ signal: AbortSignal.timeout(5000) }).catch(() => {})
   }

@@ -1,9 +1,8 @@
 import { attachmentFormat } from './attachments.js'
 import { artifactType, fileInputLimit, safeInputName } from './code.js'
+import { isTextDocument, readOfficeText, readTextChunk, textChunkSize } from './document-text.js'
 
-const textFormats = new Set('txt md markdown csv tsv json jsonl xml yaml yml log ini sql py js ts jsx tsx html css java c cpp h hpp rs go sh ps1 tex'.split(' '))
 const imageFormats = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif'])
-const textLimit = 12000
 
 function documentInfo(file) {
   return { id: file.id, name: file.name.slice(0, 180), format: file.format, bytes: file.size ?? file.blob?.size,
@@ -43,41 +42,8 @@ function whole(value, min, max, name) {
 }
 
 function chunkText(text, offset) {
-  const end = offset + textLimit
+  const end = offset + textChunkSize
   return { text: text.slice(offset, end), ...(end < text.length && { next_offset: end }) }
-}
-
-async function readPlainText(blob, offset) {
-  const prefix = new Uint8Array(await blob.slice(0, 3).arrayBuffer())
-  const encoding = prefix[0] === 0xff && prefix[1] === 0xfe ? 'utf-16le'
-    : prefix[0] === 0xfe && prefix[1] === 0xff ? 'utf-16be' : 'utf-8'
-  if (encoding !== 'utf-8' && offset % 2 !== 0) throw new Error('Utilise next_offset pour poursuivre la lecture du texte.')
-  const bytes = new Uint8Array(await blob.slice(offset, offset + textLimit + 1).arrayBuffer())
-  let length = Math.min(bytes.length, textLimit)
-  if (encoding === 'utf-8' && bytes.length > length) {
-    while (length > 0 && (bytes[length] & 0xc0) === 0x80) length--
-    if (!length) length = textLimit
-  }
-  const content = bytes.subarray(0, length)
-  let text
-  try { text = new TextDecoder(encoding, { fatal: true }).decode(content) }
-  catch { text = new TextDecoder(encoding === 'utf-8' ? 'windows-1252' : encoding).decode(content) }
-  if (text.includes('\0')) throw new Error('Le fichier semble binaire. Passe-le à Python pour l’analyser.')
-  const end = offset + length
-  return { text, ...(end < blob.size && { next_offset: end }), offset_unit: 'bytes' }
-}
-
-async function readOffice(blob, format) {
-  if (format === 'docx') {
-    const { default: mammoth } = await import('mammoth')
-    const { value } = await mammoth.extractRawText({ arrayBuffer: await blob.arrayBuffer() })
-    return value
-  }
-  const { default: readWorkbook } = await import('read-excel-file/browser')
-  const sheets = await readWorkbook(blob)
-  return sheets.filter(sheet => sheet.data.length).map(({ sheet, data }) => (
-    [`Feuille ${JSON.stringify(sheet)}`, ...data.map(row => JSON.stringify(row))].join('\n')
-  )).join('\n\n')
 }
 
 async function viewImage(blob) {
@@ -119,7 +85,7 @@ function tool(name, label, description, properties, required, run) {
 export function fileTools(messages) {
   const files = attachmentCatalog(messages)
   const selectors = {
-    file_id: { type: 'string', description: 'Identifiant renvoyé par list_attachments.' },
+    file_id: { type: 'string', description: 'Identifiant indiqué dans le message ou renvoyé par list_attachments.' },
     entry: { type: 'integer', minimum: 1, description: 'Numéro d’une entrée ZIP renvoyé par read_attachment, si nécessaire.' },
   }
   const pageField = { type: 'integer', minimum: 1, description: 'Numéro de page PDF, à partir de 1.' }
@@ -153,6 +119,10 @@ export function fileTools(messages) {
     return mounted
   }
 
+  const canSearchPdf = [...files.values()].some(file => {
+    const format = fileFormat(file)
+    return (format === 'pdf' || format === 'zip') && (file.blob || file.source === 'generated')
+  })
   const tools = files.size ? [
     tool('list_attachments', 'Liste des fichiers', 'Liste les pièces jointes et les fichiers produits dans les réponses précédentes, les plus récents en premier. Filtre par nom ou utilise next_offset pour voir la suite.', {
       query: { type: 'string' }, offset: offsetField,
@@ -184,10 +154,22 @@ export function fileTools(messages) {
         const { listArchive } = await import('./archive.js')
         return { name, ...await listArchive(blob, offset, signal) }
       }
-      if (format === 'docx' || format === 'xlsx') return { name, ...chunkText(await readOffice(blob, format), offset) }
-      if (blob.type.startsWith('text/') || textFormats.has(format)) return { name, ...await readPlainText(blob, offset) }
+      if (format === 'docx' || format === 'xlsx') return { name, ...chunkText(await readOfficeText(blob, format, signal), offset) }
+      if (isTextDocument(blob, format)) return { name, ...await readTextChunk(blob, offset, signal) }
       return { name, note: 'Utilise view_attachment pour une image, ou passe ce fichier à Python pour l’analyser.' }
     }),
+    ...(canSearchPdf ? [tool('search_attachment', 'Recherche dans le PDF',
+      'Recherche un mot ou un titre précis dans le texte d’un PDF, par exemple « TD 2 ». Renvoie les pages trouvées avec un extrait. Utilise next_page pour poursuivre si nécessaire. Passe entry si le PDF est dans un ZIP.', {
+        ...selectors, page: pageField, query: { type: 'string', maxLength: 120 },
+      }, ['file_id', 'query'], async ({ query, page = 1, ...args }, signal, onProgress) => {
+        if (typeof query !== 'string' || !query.trim() || query.length > 120) throw new Error('Recherche dans le PDF invalide.')
+        const start = whole(page, 1, Number.MAX_SAFE_INTEGER, 'Numéro de page')
+        const file = await resolve(args, signal)
+        const blob = fileFormat(file) === 'pdf' && await originalBlob(file, signal)
+        if (!blob) throw new Error('La recherche nécessite le PDF original.')
+        const { searchPdf } = await import('./pdf.js')
+        return { name: file.name.slice(0, 180), ...await searchPdf(blob, query.trim(), start, signal, onProgress) }
+      })] : []),
     tool('view_attachment', 'Examen visuel d’une page', 'Observe une image ou la page précise d’un PDF. Utile pour les scans, figures, tableaux et mises en page que le texte extrait ne restitue pas. Passe entry pour une image ou un PDF dans un ZIP.', {
       ...selectors, page: pageField,
     }, ['file_id'], async (args, signal) => {
@@ -195,9 +177,10 @@ export function fileTools(messages) {
       const page = whole(args.page ?? 1, 1, Number.MAX_SAFE_INTEGER, 'Numéro de page')
       const format = fileFormat(file)
       let url
-      if (format === 'pdf' && file.blob) {
+      if (format === 'pdf' && (file.blob || file.source === 'generated')) {
+        const blob = await originalBlob(file, signal)
         const { viewPdfPage } = await import('./pdf.js')
-        url = await viewPdfPage(file.blob, page, signal)
+        url = await viewPdfPage(blob, page, signal)
       } else if (file.url && (format === 'image' || imageFormats.has(format))) {
         url = file.url
       } else if (file.blob && (file.blob.type.startsWith('image/') || imageFormats.has(format))) {
@@ -210,6 +193,11 @@ export function fileTools(messages) {
       const label = `${file.name.slice(0, 180)}${format === 'pdf' ? ` — page ${page}` : ''}`
       return { image: label, images: [{ label, url }] }
     }),
-  ] : []
+  ].map(item => ({ ...item, detail(args) {
+    const file = files.get(args?.file_id)
+    if (!file) return ''
+    const page = Number.isSafeInteger(args.page) && args.page > 0 ? `, page ${args.page}` : ''
+    return `« ${file.name.slice(0, 100)} »${page}`
+  } })) : []
   return { tools, mount, selectors, hasFiles: files.size > 0 }
 }

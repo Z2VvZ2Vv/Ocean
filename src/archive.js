@@ -1,4 +1,4 @@
-import { BlobReader, ZipReader } from '@zip.js/zip.js'
+import { BlobReader, TextWriter, ZipReader } from '@zip.js/zip.js'
 
 const pageSize = 20
 const expandedLimit = 32 * 1024 * 1024
@@ -29,6 +29,17 @@ export async function listArchive(blob, offset, signal) {
     return false
   })
   return { entries, ...(more && { next_offset: offset + pageSize }) }
+}
+
+export async function checkArchiveSize(blob, signal, maxBytes, maxEntries, inspect) {
+  let bytes = 0
+  await inspectArchive(blob, signal, async (entry, index) => {
+    bytes += entry.uncompressedSize
+    if (bytes > maxBytes || index > maxEntries) throw new Error('Ce document contient trop de données pour être lu dans le navigateur.')
+    if (entry.encrypted) throw new Error('Ce document est protégé par un mot de passe.')
+    await inspect?.(entry.filename, () => entry.getData(new TextWriter(), { checkSignature: true, signal }))
+    return false
+  })
 }
 
 export async function extractArchiveEntry(blob, wanted, signal) {

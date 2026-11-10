@@ -23,6 +23,11 @@ export const inputLimit = 8000
 export const cloudRunTimeout = 100000
 export const interactiveRunTimeout = 175000
 export const codeStreamType = 'application/x-ndjson'
+export const codePhases = new Map([
+  ['browser', 'Exécution dans le navigateur'], ['opening', 'Démarrage de la sandbox'],
+  ['setup', 'Préparation de l’environnement'], ['compiling', 'Compilation'],
+  ['running', 'Exécution du programme'], ['reading', 'Récupération du résultat'],
+])
 export const artifactLimit = 3
 export const artifactBytes = 750000
 export const fileInputLimit = 32 * 1024 * 1024
@@ -30,8 +35,21 @@ export const cloudFileLimit = 2500000
 export const inputFilename = /^[a-z0-9][a-z0-9_.-]{0,109}$/i
 export const artifactTypes = Object.freeze({
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
-  csv: 'text/csv', txt: 'text/plain', json: 'application/json', zip: 'application/zip',
+  csv: 'text/csv', tsv: 'text/tab-separated-values', txt: 'text/plain', md: 'text/markdown',
+  json: 'application/json', zip: 'application/zip', pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 })
+const artifactFilename = /^[\p{L}\p{N}_-][\p{L}\p{M}\p{N}_. -]{0,90}\.[a-z0-9]{2,4}$/iu
+const artifactRules = {
+  filename: artifactFilename, extensions: Object.keys(artifactTypes), limit: artifactLimit, maxBytes: artifactBytes,
+}
+const artifactIssues = {
+  empty: name => `Le fichier « ${name} » est vide.`,
+  oversized: name => `Le fichier « ${name} » dépasse la limite de 750 ko.`,
+  count: name => `Ocean a écarté « ${name} » après avoir atteint la limite de trois fichiers par exécution.`,
+}
 
 export function codeLanguage(label) {
   return typeof label === 'string' ? aliases.get(label.toLowerCase()) : undefined
@@ -67,25 +85,51 @@ export function safeInputName(name, index) {
 }
 
 export function artifactType(name) {
-  if (typeof name !== 'string' || !/^[\p{L}\p{N}_-][\p{L}\p{N}_. -]{0,90}\.[a-z0-9]{2,4}$/iu.test(name)) return undefined
-  return artifactTypes[name.split('.').at(-1).toLowerCase()]
+  if (typeof name !== 'string' || !artifactFilename.test(name)) return undefined
+  const extension = name.split('.').at(-1).toLowerCase()
+  if (Object.hasOwn(artifactTypes, extension)) return artifactTypes[extension]
+}
+
+function bytesToBase64(bytes) {
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 16384) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 16384))
+  }
+  return btoa(binary)
+}
+
+export function artifactFromBytes(name, bytes) {
+  const mime = artifactType(name)
+  if (!mime) throw new Error('Nom ou format de fichier invalide.')
+  if (!bytes.length) throw new Error('Le fichier produit est vide.')
+  if (bytes.length > artifactBytes) throw new Error('Le fichier produit dépasse la limite de 750 ko.')
+  return { name, mime, url: `data:${mime};base64,${bytesToBase64(bytes)}` }
 }
 
 function normalizeArtifacts(files) {
   if (!Array.isArray(files)) return []
-  return files.slice(0, artifactLimit).flatMap(file => {
+  const artifacts = []
+  for (const file of files.slice(0, 12)) {
     const mime = artifactType(file?.name)
     const data = file?.data
-    if (!mime || typeof data !== 'string' || !data || data.length > Math.ceil(artifactBytes / 3) * 4 || !/^[\w+/]+={0,2}$/.test(data)) return []
-    return [{ name: file.name, mime, url: `data:${mime};base64,${data}` }]
-  })
+    if (!mime || typeof data !== 'string' || !data || data.length > Math.ceil(artifactBytes / 3) * 4
+      || data.length % 4 || !/^[a-z0-9+/]+={0,2}$/i.test(data)) continue
+    const size = data.length / 4 * 3 - (data.endsWith('==') ? 2 : Number(data.endsWith('=')))
+    if (size > artifactBytes || artifacts.some(artifact => artifact.name === file.name)) continue
+    artifacts.push({ name: file.name, mime, url: `data:${mime};base64,${data}` })
+    if (artifacts.length === artifactLimit) break
+  }
+  return artifacts
 }
 
 function normalizeResult(data) {
   const output = typeof data?.output === 'string' ? data.output.slice(0, 12000) : ''
   const error = typeof data?.error === 'string' ? data.error.slice(0, 3000) : ''
   const artifacts = normalizeArtifacts(data?.artifacts)
-  return { output, ...(error && { error }), ...(artifacts.length && { artifacts }) }
+  const artifactWarnings = Array.isArray(data?.artifactIssues) ? data.artifactIssues.slice(0, artifactLimit)
+    .flatMap(issue => artifactType(issue?.name) && Object.hasOwn(artifactIssues, issue.reason)
+      && !artifacts.some(artifact => artifact.name === issue.name) ? [artifactIssues[issue.reason](issue.name)] : []) : []
+  return { output, ...(error && { error }), ...(artifacts.length && { artifacts }), ...(artifactWarnings.length && { artifactWarnings }) }
 }
 
 export function validateProgram(code, stdin) {
@@ -118,7 +162,7 @@ function runInBrowser(language, code, stdin, signal, files = []) {
 
     channel.port1.onmessage = ({ data }) => done(resolve, normalizeResult(data))
     signal.addEventListener('abort', abort, { once: true })
-    frame.onload = () => frame.contentWindow.postMessage({ code, stdin, files }, '*', [channel.port2])
+    frame.onload = () => frame.contentWindow.postMessage({ code, stdin, files, artifactRules }, '*', [channel.port2])
     document.body.append(frame)
   })
 }
@@ -135,7 +179,10 @@ export function validatePackages(packages) {
   return [...new Set(packages)]
 }
 
-const pypiNames = { PIL: 'Pillow', cv2: 'opencv-python-headless', sklearn: 'scikit-learn', yaml: 'PyYAML', bs4: 'beautifulsoup4' }
+const pypiNames = {
+  PIL: 'Pillow', cv2: 'opencv-python-headless', sklearn: 'scikit-learn', yaml: 'PyYAML', bs4: 'beautifulsoup4',
+  docx: 'python-docx', pptx: 'python-pptx', fitz: 'PyMuPDF',
+}
 
 async function encodeCloudFiles(files, signal) {
   if (files.reduce((total, file) => total + file.blob.size, 0) > cloudFileLimit) {
@@ -145,11 +192,7 @@ async function encodeCloudFiles(files, signal) {
   for (const { name, blob } of files) {
     signal.throwIfAborted()
     const bytes = new Uint8Array(await blob.arrayBuffer())
-    let binary = ''
-    for (let offset = 0; offset < bytes.length; offset += 16384) {
-      binary += String.fromCharCode(...bytes.subarray(offset, offset + 16384))
-    }
-    encoded.push({ name, data: btoa(binary) })
+    encoded.push({ name, data: bytesToBase64(bytes) })
   }
   return encoded
 }

@@ -9,25 +9,32 @@ function pythonWorker() {
     }
   }
 
-  function collectFiles(python) {
+  function collectFiles(python, { filename, extensions, limit, maxBytes }) {
     const fs = python.FS
-    const files = []
+    const artifacts = []
+    const artifactIssues = []
     for (const { name, path } of outputEntries(fs)) {
-      if (!/\.(png|jpe?g|webp|csv|txt|json|zip)$/i.test(name) || files.some(file => file.name === name)) continue
+      const extension = name.split('.').at(-1).toLowerCase()
+      if (!filename.test(name) || !extensions.includes(extension) || artifacts.some(file => file.name === name)) continue
       const info = fs.lstat(path)
-      if (!fs.isFile(info.mode) || info.size < 1 || info.size > 750000) continue
+      if (!fs.isFile(info.mode)) continue
+      const reason = artifacts.length === limit ? 'count' : info.size === 0 ? 'empty' : info.size > maxBytes ? 'oversized' : ''
+      if (reason) {
+        if (artifactIssues.length < limit) artifactIssues.push({ name, reason })
+        if (artifacts.length === limit && artifactIssues.length === limit) break
+        continue
+      }
       const data = fs.readFile(path)
       let binary = ''
       for (let offset = 0; offset < data.length; offset += 16384) {
         binary += String.fromCharCode(...data.subarray(offset, offset + 16384))
       }
-      files.push({ name, data: btoa(binary) })
-      if (files.length === 3) break
+      artifacts.push({ name, data: btoa(binary) })
     }
-    return files
+    return { artifacts, artifactIssues }
   }
 
-  self.onmessage = async ({ data: { code, stdin, files } }) => {
+  self.onmessage = async ({ data: { code, stdin, files, artifactRules } }) => {
     let output = ''
     const append = value => {
       if (output.length < 12000) output += value.slice(0, 12000 - output.length) + '\n'
@@ -62,7 +69,7 @@ if _ocean_plt:
         _ocean_plt.figure(_ocean_fig).savefig(f'/mnt/data/graphique-{_ocean_i}.png', dpi=110)
 `)
       }
-      self.postMessage({ output: output.trimEnd(), artifacts: collectFiles(python) })
+      self.postMessage({ output: output.trimEnd(), ...collectFiles(python, artifactRules) })
     } catch (error) {
       self.postMessage({ error: String(error).slice(0, 3000), output: output.trimEnd() })
     }
@@ -114,7 +121,7 @@ window.addEventListener('message', event => {
       port.postMessage({ error: 'Impossible de démarrer le moteur de code.' })
       worker.terminate()
     }
-    worker.postMessage({ code: event.data.code, stdin: event.data.stdin || '', files: event.data.files || [] })
+    worker.postMessage({ code: event.data.code, stdin: event.data.stdin || '', files: event.data.files || [], artifactRules: event.data.artifactRules })
   } catch {
     port.postMessage({ error: 'Le navigateur a bloqué le moteur de code.' })
   } finally {

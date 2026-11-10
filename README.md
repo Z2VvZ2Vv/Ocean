@@ -57,14 +57,18 @@ L’adresse préremplie dans Ocean est `http://pop-os-comfyui.tail917fd3.ts.net:
 ## Utiliser les outils
 
 - **Apprentissage guidé** se trouve dans le menu **+**. Il demande au modèle de donner un indice à la fois et d’attendre la tentative de l’élève. Le respect de cette consigne dépend du modèle chargé.
-- **Réflexion** se trouve dans le menu du modèle. Choisis **Bas**, **Moyen** ou **Élevé**. **Élevé** est le réglage par défaut et correspond à `xhigh` côté API.
+- **Réflexion** se trouve dans le menu du modèle. **Bas** demande à Qwen une réponse directe. **Moyen** et **Élevé** activent la réflexion. **Élevé** est le réglage par défaut et correspond à `xhigh` côté API.
 - **Python** s’exécute dans un worker isolé du navigateur. Le moteur Pyodide est téléchargé depuis jsDelivr au besoin. **Recherche web** utilise la clé Brave si elle est configurée. Le modèle choisit d’appeler les outils via son template de function calling.
 - **Schémas et code**. Ocean affiche les blocs Mermaid comme des schémas ou des graphiques. Les blocs de code identifiés par leur langage sont colorés et copiables. Clique sur **Modifier** pour tester ta version d’un programme avec **Exécuter**. L’icône de réinitialisation rétablit le code de la réponse. Python et JavaScript de base fonctionnent dans le navigateur.
 - **OneNote**. Colle dans le champ du chat. Quand le navigateur reçoit une image avec le texte ou le HTML de la sélection, Ocean joint uniquement l’image. Si OneNote fournit exclusivement du texte au navigateur, utilise une capture Windows (`Win+Maj+S`) et colle-la.
-- **Fichiers**. Utilise **+ → Ajouter des fichiers** ou dépose-les sur le champ de saisie. Tu peux joindre des PDF, des images, des ZIP et d’autres formats sans limite de nombre imposée par Ocean. Le navigateur conserve les fichiers dans l’historique selon l’espace de stockage disponible.
+- **Fichiers**. Utilise **+ → Ajouter des fichiers** ou dépose-les sur le champ de saisie. Clique sur un fichier dans le chat pour le prévisualiser ou télécharger l’original. Le navigateur conserve les fichiers dans l’historique selon l’espace de stockage disponible.
 - **Apparence**. Choisis **Clair**, **Sombre** ou **Système** dans les paramètres. Ocean mémorise le choix dans le navigateur.
 
-Le modèle lit les fichiers à la demande. Il peut parcourir le texte des PDF par pages, afficher une page en image pour examiner un scan ou un schéma, et lister puis ouvrir les entrées d’un ZIP. L’examen visuel exige un modèle compatible vision. Les fichiers des anciennes discussions étaient enregistrés sous forme d’extraits. Joins de nouveau un PDF ancien pour examiner une autre page.
+Pour les petits PDF, DOCX, XLSX et fichiers texte joints au message, Ocean peut inclure le texte dès la première requête au modèle. Pour les longs PDF, le modèle peut rechercher un titre ou un passage puis ouvrir les pages correspondantes. Il peut aussi examiner les figures ou les scans en image et ouvrir les entrées d’un ZIP. L’examen visuel par le modèle exige la compatibilité vision. Les fichiers des anciennes discussions étaient enregistrés sous forme d’extraits. Joins de nouveau un PDF ancien pour examiner une autre page.
+
+Demande un document Word, un tableau Excel ou CSV, ou un fichier texte à Ocean. L’outil de création simple produit le fichier dans le navigateur. Les téléchargements apparaissent dès que l’outil les a créés.
+
+Pendant une réponse, Ocean indique si le navigateur lit un fichier, attend le modèle, exécute un outil ou reçoit le texte de la réponse. La section **Activité** garde les lectures et les appels d’outils de la réponse.
 
 `npm test` vérifie le protocole d’inférence avec un serveur simulé. `npm run build` compile la version de production.
 
@@ -76,7 +80,7 @@ La sandbox exécute JavaScript (Node.js), TypeScript, Bash, C, C++, C#, Java, Go
 
 Pour un programme qui demande des valeurs, **Exécuter** ouvre une console dans la sandbox. Réponds ligne par ligne à ses invites. **Fin de saisie** signale qu’il n’y a plus de données. Les options du bloc permettent aussi de lancer manuellement la console ou de fournir toutes les valeurs à l’avance.
 
-Python peut renvoyer des graphiques Matplotlib et des fichiers PNG, JPEG, WebP, CSV, TXT, JSON et ZIP. Enregistre-les dans `artifacts/`. Ocean affiche les images dans le chat et propose de télécharger les fichiers. Chaque exécution rapporte jusqu’à trois fichiers de 750 ko chacun. Le plan Hobby inclut un quota de sandbox. [Quotas Vercel Sandbox](https://vercel.com/docs/sandbox/pricing)
+Python peut renvoyer des graphiques Matplotlib et des fichiers PNG, JPEG, WebP, PDF, DOCX, XLSX, PPTX, CSV, TSV, MD, TXT, JSON et ZIP. Enregistre-les dans `artifacts/`. Matplotlib peut produire des PDF dans le navigateur. Pour les bibliothèques documentaires comme ReportLab, python-docx et openpyxl, utilise la sandbox cloud. Ocean garde jusqu’à trois fichiers de 750 ko chacun par réponse. Le plan Hobby inclut un quota de sandbox. [Quotas Vercel Sandbox](https://vercel.com/docs/sandbox/pricing)
 
 L’outil Python peut ouvrir dans `attachments/` les pièces jointes et les fichiers produits dans les réponses précédentes, y compris un fichier extrait d’un ZIP. Traite les gros lots en plusieurs exécutions. Le navigateur monte jusqu’à 32 Mio par exécution et la sandbox Vercel jusqu’à 2,5 Mo par requête. Seuls les fichiers sélectionnés pour une exécution cloud sont envoyés à Vercel.
 
