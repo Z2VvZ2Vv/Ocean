@@ -33,7 +33,6 @@ export default function AnswerActivity({ steps = [], progress, generating }) {
   const duration = elapsed < 60 ? `${elapsed} s` : `${Math.floor(elapsed / 60)} min ${elapsed % 60} s`
   return <section className="answer-activity" data-running={generating || undefined}>
     <button className="activity-toggle" type="button" aria-expanded={open} aria-controls={panelId} onClick={() => setExpanded(!open)}>
-      <span className="activity-emblem"><Sparkles size={15} aria-hidden="true" /></span>
       <span>Activité</span>
       {generating && <span className="activity-badge">En cours</span>}
       {generating && elapsed >= 2 && <span className="activity-duration" aria-hidden="true"><Clock3 size={12} /> {duration}</span>}

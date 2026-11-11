@@ -189,6 +189,7 @@ button.file-chip-trigger:hover .file-label strong { color: var(--blue); }
 .user-images img { border-radius: 15px; width: auto; height: auto; max-width: 100%; max-height: 220px; object-fit: contain; }
 .answer { display: flex; align-items: flex-start; gap: 15px; line-height: 1.62; font-size: 15px; }
 .answer-mark { flex: 0 0 24px; padding-top: 1px; }
+.answer:has(.answer-activity) .answer-mark { padding-top: 8px; }
 .answer-mark img { width: 24px; height: 24px; }
 .answer-body { flex: 1; min-width: 0; }
 .markdown { overflow-wrap: anywhere; --math-gap: .85em; --math-line-height: 1.68; --math-step-gap: .35em; }
@@ -274,8 +275,7 @@ button.file-chip-trigger:hover .file-label strong { color: var(--blue); }
 .answer-menu { bottom: calc(100% + 5px); left: 0; min-width: 175px; }
 .generation-status { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); margin: 1px 0 10px; }
 .answer-activity { margin: 0 0 20px; max-width: 620px; font-size: 13px; color: var(--muted); }
-.activity-toggle { display: flex; align-items: center; gap: 9px; padding: 6px 0; width: 100%; border: 0; background: none; text-align: left; font-weight: 520; }
-.activity-emblem { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--divider); border-radius: 10px; color: var(--blue); background: var(--accent-bg); }
+.activity-toggle { display: flex; align-items: center; gap: 9px; min-height: 40px; padding: 6px 0; width: 100%; border: 0; background: none; text-align: left; font-weight: 520; }
 .activity-badge { border-radius: 12px; background: var(--bubble); padding: 3px 8px; font-size: 10px; font-weight: 450; letter-spacing: .02em; }
 .activity-duration { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; white-space: nowrap; font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .activity-chevron { margin-left: auto; transition: transform .2s ease; }
