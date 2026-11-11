@@ -50,7 +50,7 @@ async function spreadsheet(rows, header) {
 
 async function wordDocument(content) {
   const [docx, { unified }, { default: remarkParse }, { default: remarkGfm }, { default: remarkMath }] = await Promise.all([
-    import('docx'), import('unified'), import('remark-parse'), import('remark-gfm'), import('remark-math'),
+    import('docx'), import('unified'), import('remark-parse'), import('remark-gfm'), import('./remark-latex-math.js'),
   ])
   const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, HeadingLevel, WidthType } = docx
   const tree = unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(content)

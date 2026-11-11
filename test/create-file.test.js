@@ -37,6 +37,18 @@ test('un Word conserve le LaTeX pour son aperçu sans interpréter les indices c
   assert.match(html.value, /<code>\$a_0\$<\/code>/)
 })
 
+test('les tableaux Word conservent les délimiteurs TeX et les indices des formules', async () => {
+  const formula = String.raw`\(\vec E_O=\dfrac{8\sqrt{2}kq}{a^2}\vec e_x\)`
+  const { artifacts: [file] } = await createFile({
+    name: 'tableau-formules.docx',
+    content: `| Champ | Potentiel |\n| --- | --- |\n| ${formula} | \\(V(O)=0\\) |`,
+  }, signal)
+  const { value } = await mammoth.convertToHtml({ buffer: artifactBytes(file) })
+  assert.ok(value.includes(`<td><p>${formula}</p></td>`))
+  assert.ok(value.includes('<td><p>\\(V(O)=0\\)</p></td>'))
+  assert.doesNotMatch(value, /<em>/)
+})
+
 test('un fichier CSV échappe les séparateurs et protège les cellules texte interprétables comme formules', async () => {
   const { artifacts: [file] } = await createFile({ name: 'mesures.csv', rows: [['Un, deux', 'A "B"', '=A1', -2]] }, signal)
   assert.equal(artifactBytes(file).toString(), `\uFEFF"Un, deux","A ""B""","'=A1","-2"\r\n`)
